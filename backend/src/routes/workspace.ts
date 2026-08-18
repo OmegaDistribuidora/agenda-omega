@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import prisma from "../lib/prisma";
 import { env } from "../config";
-import { hashPassword, requireAdmin, requireAuth } from "../lib/security";
+import { hashPassword, isAdminRole, requireAdmin, requireAuth } from "../lib/security";
 
 const taskInclude = {
   creator: { select: { id: true, displayName: true, username: true, avatarColor: true } },
@@ -18,7 +18,7 @@ const taskInclude = {
 } as const;
 
 async function allowedTeamIds(request: FastifyRequest) {
-  if (request.authUser!.role === "ADMIN") return (await prisma.team.findMany({ select: { id: true } })).map((t) => t.id);
+  if (isAdminRole(request.authUser!.role)) return (await prisma.team.findMany({ select: { id: true } })).map((t) => t.id);
   return (await prisma.teamMember.findMany({ where: { userId: request.authUser!.userId }, select: { teamId: true } })).map((t) => t.teamId);
 }
 async function requireTeamAccess(request: FastifyRequest, reply: FastifyReply, teamId: number) {
@@ -38,14 +38,14 @@ async function folderBelongsToTeam(reply: FastifyReply, folderId: number | null 
   if (!folder || folder.teamId !== teamId) { reply.code(400).send({ message: "A pasta selecionada não pertence à equipe da atividade." }); return false; }
   return true;
 }
-const person = { select: { id: true, username: true, displayName: true, email: true, avatarColor: true, role: true, active: true } } as const;
+const person = { select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true } } as const;
 
 export async function registerWorkspaceRoutes(app: FastifyInstance) {
   app.get("/api/bootstrap", { preHandler: [requireAuth] }, async (request) => {
     const teamIds = await allowedTeamIds(request);
     const [teams, users, folders, tags, tasks] = await Promise.all([
       prisma.team.findMany({ where: { id: { in: teamIds } }, include: { members: { include: { user: person } } }, orderBy: { name: "asc" } }),
-      prisma.user.findMany({ where: request.authUser!.role === "ADMIN" ? {} : { active: true, teamLinks: { some: { teamId: { in: teamIds } } } }, select: { id: true, username: true, displayName: true, email: true, avatarColor: true, role: true, active: true }, orderBy: { displayName: "asc" } }),
+      prisma.user.findMany({ where: isAdminRole(request.authUser!.role) ? {} : { active: true, teamLinks: { some: { teamId: { in: teamIds } } } }, select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true }, orderBy: { displayName: "asc" } }),
       prisma.folder.findMany({ where: { teamId: { in: teamIds } }, orderBy: [{ teamId: "asc" }, { name: "asc" }] }),
       prisma.tag.findMany({ where: { teamId: { in: teamIds } }, orderBy: { name: "asc" } }),
       prisma.task.findMany({ where: { teamId: { in: teamIds }, deletedAt: null }, include: taskInclude, orderBy: [{ position: "asc" }, { createdAt: "desc" }] })
@@ -183,8 +183,8 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/admin/users", { preHandler: [requireAuth, requireAdmin] }, async (request, reply) => {
-    const parsed = z.object({ username: z.string().trim().min(2).max(80), displayName: z.string().trim().min(2).max(120), email: z.string().email().optional().nullable(), role: z.enum(["ADMIN", "USER"]).optional(), teamIds: z.array(z.number().int().positive()).min(1) }).safeParse(request.body); if (!parsed.success) return reply.code(400).send({ message: parsed.error.issues[0]?.message || "Dados do usuário inválidos." });
-    const passwordHash = await hashPassword(crypto.randomBytes(32).toString("hex")); return reply.code(201).send(await prisma.user.create({ data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, email: parsed.data.email, role: parsed.data.role, passwordHash, teamLinks: { create: parsed.data.teamIds.map((teamId) => ({ teamId })) } }, include: { teamLinks: { include: { team: true } } } }));
+    const parsed = z.object({ username: z.string().trim().min(2).max(80), displayName: z.string().trim().min(2).max(120), code: z.string().trim().max(40).optional().nullable(), email: z.string().email().optional().nullable(), role: z.enum(["ADMIN", "USER", "SUPERVISOR", "COORDINATOR"]), teamIds: z.array(z.number().int().positive()).min(1) }).safeParse(request.body); if (!parsed.success) return reply.code(400).send({ message: parsed.error.issues[0]?.message || "Dados do usuário inválidos." });
+    const passwordHash = await hashPassword(crypto.randomBytes(32).toString("hex")); return reply.code(201).send(await prisma.user.create({ data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, code: parsed.data.code || null, email: parsed.data.email, role: parsed.data.role, passwordHash, teamLinks: { create: parsed.data.teamIds.map((teamId) => ({ teamId })) } }, include: { teamLinks: { include: { team: true } } } }));
   });
 
   app.patch("/api/admin/users/:id", { preHandler: [requireAuth, requireAdmin] }, async (request, reply) => {
@@ -192,8 +192,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const parsed = z.object({
       username: z.string().trim().min(2).max(80),
       displayName: z.string().trim().min(2).max(120),
+      code: z.string().trim().max(40).nullable(),
       email: z.string().email().nullable(),
-      role: z.enum(["ADMIN", "USER"]),
+      role: z.enum(["ADMIN", "USER", "SUPERVISOR", "COORDINATOR"]),
       active: z.boolean(),
       teamIds: z.array(z.number().int().positive()).min(1).refine((ids) => new Set(ids).size === ids.length)
     }).safeParse(request.body);
@@ -207,7 +208,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (validTeams !== parsed.data.teamIds.length) return reply.code(400).send({ message: "Uma das equipes selecionadas não existe." });
     try {
       const updated = await prisma.$transaction(async (tx) => {
-        await tx.user.update({ where: { id }, data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, email: parsed.data.email, role: parsed.data.role, active: parsed.data.active } });
+        await tx.user.update({ where: { id }, data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, code: parsed.data.code || null, email: parsed.data.email, role: parsed.data.role, active: parsed.data.active } });
         await tx.teamMember.deleteMany({ where: { userId: id } });
         await tx.teamMember.createMany({ data: parsed.data.teamIds.map((teamId) => ({ userId: id, teamId })) });
         return tx.user.findUnique({ where: { id }, include: { teamLinks: { include: { team: true } } } });

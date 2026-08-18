@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-08-18
+
+### Funcionalidades
+
+- adiciona código opcional ao cadastro e à edição de usuários;
+- adiciona os perfis obrigatórios Supervisor e Coordenador;
+- mantém Supervisor e Coordenador com as mesmas permissões do perfil Colaborador;
+- exibe código e perfil na administração e o perfil do usuário na barra lateral.
+
 ## 1.0.1 — 2026-08-18
 
 ### Correções

@@ -10,6 +10,8 @@ datasource db {
 enum UserRole {
   ADMIN
   USER
+  SUPERVISOR
+  COORDINATOR
 }
 enum TeamRole {
   LEAD
@@ -43,6 +45,7 @@ model User {
   id            Int              @id @default(autoincrement())
   username      String           @unique
   displayName   String
+  code          String?
   email         String?
   avatarColor   String           @default("#e56545")
   passwordHash  String

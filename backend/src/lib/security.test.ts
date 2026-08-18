@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import jwt from "jsonwebtoken";
-import { comparePassword, hashPassword, signToken } from "./security";
+import { comparePassword, hashPassword, isAdminRole, signToken } from "./security";
 import { env } from "../config";
 
 test("senhas são armazenadas com hash e comparadas corretamente", async () => {
@@ -18,4 +18,11 @@ test("sessão local contém identidade e perfil", () => {
   assert.equal(payload.username, "joao");
   assert.equal(payload.role, "USER");
   assert.ok(payload.exp);
+});
+
+test("supervisor e coordenador mantêm permissões de colaborador", () => {
+  assert.equal(isAdminRole("USER"), false);
+  assert.equal(isAdminRole("SUPERVISOR"), false);
+  assert.equal(isAdminRole("COORDINATOR"), false);
+  assert.equal(isAdminRole("ADMIN"), true);
 });

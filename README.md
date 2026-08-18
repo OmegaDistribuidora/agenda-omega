@@ -5,7 +5,7 @@ Agenda colaborativa interna da Omega. Reúne atividades pessoais e das equipes e
 ## O que está pronto
 
 - login delegado pelo SSO do Ecossistema Omega e login local de desenvolvimento;
-- usuários em uma ou várias equipes;
+- usuários em uma ou várias equipes, com código opcional e perfis de Colaborador, Supervisor, Coordenador ou Administrador;
 - criação rápida pela última linha da lista e criação completa pelo modal;
 - vários responsáveis por atividade;
 - estados **A fazer**, **Em andamento** e **Concluído**, inclusive por botão rápido ou drag-and-drop;
@@ -15,7 +15,7 @@ Agenda colaborativa interna da Omega. Reúne atividades pessoais e das equipes e
 - Kanban com cartões, progresso do checklist, responsáveis e prazo;
 - descrição, subtarefas, timeline e anexos de até 10 MB;
 - exclusão lógica, preservando o evento no histórico do banco;
-- administração para criar e excluir equipes, além de cadastrar e excluir usuários;
+- administração para criar, editar e excluir equipes e usuários;
 - layout responsivo para desktop, tablet e celular.
 
 ## Stack

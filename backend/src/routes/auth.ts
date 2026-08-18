@@ -8,7 +8,7 @@ import { comparePassword, requireAuth, signToken } from "../lib/security";
 const consumed = new Map<string, number>();
 const userInclude = { teamLinks: { include: { team: true } } } as const;
 function serializeUser(user: any) {
-  return { id: user.id, username: user.username, displayName: user.displayName, email: user.email, avatarColor: user.avatarColor, role: user.role, active: user.active, teams: (user.teamLinks || []).map((link: any) => ({ ...link.team, memberRole: link.role })) };
+  return { id: user.id, username: user.username, displayName: user.displayName, code: user.code, email: user.email, avatarColor: user.avatarColor, role: user.role, active: user.active, teams: (user.teamLinks || []).map((link: any) => ({ ...link.team, memberRole: link.role })) };
 }
 async function issue(user: any) {
   return { token: signToken({ userId: user.id, username: user.username, role: user.role }), user: serializeUser(user) };

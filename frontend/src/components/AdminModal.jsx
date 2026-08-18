@@ -3,6 +3,13 @@ import { Pencil, Plus, ShieldCheck, Trash2, Users, X } from "lucide-react";
 import { apiJson } from "../services/api";
 import { Avatar, Modal } from "./ui";
 
+const ROLE_LABELS = {
+  USER: "Colaborador",
+  SUPERVISOR: "Supervisor",
+  COORDINATOR: "Coordenador",
+  ADMIN: "Administrador"
+};
+
 export default function AdminModal({ data, token, currentUserId, onClose, onChanged, notify }) {
   const [tab, setTab] = useState("users");
   const [showForm, setShowForm] = useState(false);
@@ -40,6 +47,7 @@ export default function AdminModal({ data, token, currentUserId, onClose, onChan
     const payload = {
       username: form.get("username"),
       displayName: form.get("displayName"),
+      code: form.get("code") || null,
       email: form.get("email") || null,
       role: form.get("role"),
       active: editingUser ? form.get("active") === "true" : true,
@@ -137,9 +145,9 @@ export default function AdminModal({ data, token, currentUserId, onClose, onChan
         {tab === "users" ? <div className="admin-table">
           <div className="table-head"><span>Pessoa</span><span>Equipes</span><span>Perfil</span><span>Status</span><span /></div>
           {data.users.map((person) => <div className="table-row" key={person.id}>
-            <span className="person-cell"><Avatar user={person} /><span><strong>{person.displayName}</strong><small>@{person.username}</small></span></span>
+            <span className="person-cell"><Avatar user={person} /><span><strong>{person.displayName}</strong><small>{person.code ? `Cód. ${person.code} · ` : ""}@{person.username}</small></span></span>
             <span>{data.teams.filter((team) => team.members.some((member) => member.userId === person.id)).map((team) => <i key={team.id} style={{ "--team": team.color }}>{team.name}</i>)}</span>
-            <span>{person.role === "ADMIN" ? "Administrador" : "Colaborador"}</span>
+            <span>{ROLE_LABELS[person.role] || "Colaborador"}</span>
             <span className={person.active ? "active-pill" : "inactive-pill"}>{person.active ? "Ativo" : "Inativo"}</span>
             <span className="admin-actions"><button className="admin-edit" disabled={busy} onClick={() => openEditForm(person)} title="Editar usuário"><Pencil /></button><button className="admin-delete" disabled={busy || person.id === currentUserId} onClick={() => deleteUser(person)} title={person.id === currentUserId ? "Sua conta não pode ser excluída" : "Excluir usuário"}><Trash2 /></button></span>
           </div>)}
@@ -155,8 +163,9 @@ function UserForm({ person, teamIds, teams, busy, currentUserId, onSubmit, onCan
     <div className="form-grid">
       <label>Nome completo<input name="displayName" required defaultValue={person?.displayName || ""} placeholder="Ex.: João Martins" /></label>
       <label>Login do Ecossistema<input name="username" required defaultValue={person?.username || ""} placeholder="joao.martins" /></label>
+      <label>Código (opcional)<input name="code" maxLength="40" defaultValue={person?.code || ""} placeholder="Ex.: 00127" /></label>
       <label>E-mail<input name="email" type="email" defaultValue={person?.email || ""} placeholder="joao@empresa.com.br" /></label>
-      <label>Perfil<select name="role" defaultValue={person?.role || "USER"} disabled={person?.id === currentUserId}><option value="USER">Colaborador</option><option value="ADMIN">Administrador</option></select>{person?.id === currentUserId && <input type="hidden" name="role" value="ADMIN" />}</label>
+      <label>Perfil<select name="role" required defaultValue={person?.role || "USER"} disabled={person?.id === currentUserId}><option value="USER">Colaborador</option><option value="SUPERVISOR">Supervisor</option><option value="COORDINATOR">Coordenador</option><option value="ADMIN">Administrador</option></select>{person?.id === currentUserId && <input type="hidden" name="role" value="ADMIN" />}</label>
       {person && <label>Status<select name="active" defaultValue={String(person.active)} disabled={person.id === currentUserId}><option value="true">Ativo</option><option value="false">Inativo</option></select>{person.id === currentUserId && <input type="hidden" name="active" value="true" />}</label>}
     </div>
     <fieldset><legend>Equipes</legend>{teams.map((team) => <label className="check-team" key={team.id}><input type="checkbox" name={`team-${team.id}`} defaultChecked={teamIds.includes(team.id)} /><span style={{ "--team": team.color }}>{team.name}</span></label>)}</fieldset>

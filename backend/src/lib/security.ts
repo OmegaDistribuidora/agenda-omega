@@ -5,6 +5,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { env } from "../config";
 import type { AuthUser } from "../types";
 
+export const isAdminRole = (role: AuthUser["role"] | undefined) => role === "ADMIN";
 export const hashPassword = (value: string) => bcrypt.hash(value, 10);
 export const comparePassword = (value: string, hash: string) => bcrypt.compare(value, hash);
 export function signToken(payload: Pick<AuthUser, "userId" | "username" | "role">) {
@@ -18,5 +19,5 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   } catch { return reply.code(401).send({ message: "Sessão expirada ou inválida." }); }
 }
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
-  if (request.authUser?.role !== "ADMIN") return reply.code(403).send({ message: "Acesso restrito à administração." });
+  if (!isAdminRole(request.authUser?.role)) return reply.code(403).send({ message: "Acesso restrito à administração." });
 }
