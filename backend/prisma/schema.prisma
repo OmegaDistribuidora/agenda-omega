@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+enum TeamRole {
+  LEAD
+  MEMBER
+}
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+enum ActivityAction {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+  COMMENTED
+  ATTACHMENT_ADDED
+  ATTACHMENT_REMOVED
+  SUBTASK_CHANGED
+  DELETED
+  RESTORED
+}
+
+model User {
+  id            Int              @id @default(autoincrement())
+  username      String           @unique
+  displayName   String
+  email         String?
+  avatarColor   String           @default("#e56545")
+  passwordHash  String
+  role          UserRole         @default(USER)
+  active        Boolean          @default(true)
+  teamLinks     TeamMember[]
+  createdTasks  Task[]           @relation("TaskCreator")
+  assignments   TaskAssignee[]
+  folders       Folder[]
+  comments      Comment[]
+  activityLogs  ActivityLog[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+model Team {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  description String?
+  color       String       @default("#4f7a68")
+  members     TeamMember[]
+  tasks       Task[]
+  tags        Tag[]
+  folders     Folder[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model TeamMember {
+  userId    Int
+  teamId    Int
+  role      TeamRole @default(MEMBER)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@id([userId, teamId])
+  @@index([teamId])
+}
+
+model Folder {
+  id        Int      @id @default(autoincrement())
+  name      String
+  color     String   @default("#d9a441")
+  ownerId   Int
+  teamId    Int
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([teamId, name])
+  @@index([teamId])
+}
+
+model Task {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueAt       DateTime?
+  completedAt DateTime?
+  position    Float        @default(0)
+  creatorId   Int
+  teamId      Int
+  folderId    Int?
+  creator     User         @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  team        Team         @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  folder      Folder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  assignees   TaskAssignee[]
+  tags        TaskTag[]
+  subtasks    Subtask[]
+  comments    Comment[]
+  attachments Attachment[]
+  activity    ActivityLog[]
+  deletedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  @@index([teamId, status])
+  @@index([creatorId])
+  @@index([dueAt])
+  @@index([deletedAt])
+}
+
+model TaskAssignee {
+  taskId    Int
+  userId    Int
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+model Tag {
+  id        Int       @id @default(autoincrement())
+  name      String
+  color     String    @default("#6594a6")
+  teamId    Int
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tasks     TaskTag[]
+  createdAt DateTime  @default(now())
+  @@unique([teamId, name])
+}
+
+model TaskTag {
+  taskId Int
+  tagId  Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  @@id([taskId, tagId])
+  @@index([tagId])
+}
+
+model Subtask {
+  id          Int      @id @default(autoincrement())
+  taskId      Int
+  title       String
+  completed   Boolean  @default(false)
+  position    Int      @default(0)
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([taskId])
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  taskId    Int
+  authorId  Int
+  body      String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([taskId, createdAt])
+}
+
+model Attachment {
+  id           Int      @id @default(autoincrement())
+  taskId       Int
+  uploadedById Int
+  originalName String
+  storedName   String
+  mimeType     String
+  size         Int
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  @@index([taskId])
+}
+
+model ActivityLog {
+  id          Int            @id @default(autoincrement())
+  taskId      Int
+  actorId     Int?
+  action      ActivityAction
+  summary     String
+  metadata    Json?
+  task        Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor       User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt   DateTime       @default(now())
+  @@index([taskId, createdAt])
+}

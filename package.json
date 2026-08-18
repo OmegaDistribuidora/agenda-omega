@@ -1,0 +1,25 @@
+{
+  "name": "agenda-omega",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm run test --workspace backend && npm run test --workspace frontend",
+    "start": "npm run start --workspace backend",
+    "prisma:generate": "dotenv -e .env -- npm run prisma:generate --workspace backend",
+    "prisma:push": "dotenv -e .env -- npm run prisma:push --workspace backend",
+    "prisma:migrate": "dotenv -e .env -- npm run prisma:migrate --workspace backend",
+    "seed": "dotenv -e .env -- npm run seed --workspace backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^8.0.0"
+  }
+}
