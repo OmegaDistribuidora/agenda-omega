@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-08-18
+
+### Correções
+
+- corrige o build no Railway removendo a segunda execução concorrente de `npm ci`;
+- fixa o ambiente de build e execução em Node.js 22, compatível com as dependências atuais.
+
 ## 1.0.0 — 2026-08-18
 
 Primeira versão de produção da Agenda Omega.

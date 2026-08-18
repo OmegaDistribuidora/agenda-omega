@@ -1,7 +1,7 @@
 {
   "name": "agenda-omega-backend",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
