@@ -82,10 +82,11 @@ test("agrupa conclusões por dia na visão semanal", () => {
   const start = new Date("2026-08-17T00:00:00-03:00");
   const end = new Date("2026-08-24T00:00:00-03:00");
   const buckets = completionBuckets([
-    { status: "DONE", completedAt: "2026-08-17T10:00:00-03:00" },
-    { status: "DONE", completedAt: "2026-08-17T15:00:00-03:00" },
-    { status: "DONE", completedAt: "2026-08-19T09:00:00-03:00" },
-    { status: "TODO", completedAt: null }
+    { id: 1, title: "Primeira", status: "DONE", completedAt: "2026-08-17T10:00:00-03:00" },
+    { id: 2, title: "Segunda", status: "DONE", completedAt: "2026-08-17T15:00:00-03:00" },
+    { id: 3, title: "Terceira", status: "DONE", completedAt: "2026-08-19T09:00:00-03:00" },
+    { id: 4, title: "Aberta", status: "TODO", completedAt: null }
   ], start, end, "week");
   assert.deepEqual(buckets.map((bucket) => bucket.value), [2, 0, 1, 0, 0, 0, 0]);
+  assert.deepEqual(buckets[0].tasks.map((task) => task.id), [1, 2]);
 });

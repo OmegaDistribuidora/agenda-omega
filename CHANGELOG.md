@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — 2026-08-19
+
+### Funcionalidades
+
+- exibe as atividades de cada barra do gráfico de conclusões ao passar o mouse ou usar o foco do teclado;
+- permite abrir a atividade diretamente pelo detalhamento da barra;
+- adiciona o radar de atividades concluídas ao lado das atividades que pedem atenção;
+- aumenta a legibilidade de todos os textos neutros e cinza da análise por usuário;
+- mantém os tooltips contidos na tela em desktop e celular.
+
 ## 1.2.0 — 2026-08-19
 
 ### Funcionalidades

@@ -15,6 +15,11 @@ function dueText(value) {
   return new Date(value).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
 }
 
+function completionMoment(value, period) {
+  if (!value) return "Sem data registrada";
+  return new Date(value).toLocaleString("pt-BR", period === "week" ? { hour: "2-digit", minute: "2-digit" } : { day: "2-digit", month: "short" }).replace(".", "");
+}
+
 function attentionScore(task) {
   const overdue = task.dueAt && new Date(task.dueAt) < new Date().setHours(0, 0, 0, 0) ? 100 : 0;
   const active = task.status === "IN_PROGRESS" ? 10 : 0;
@@ -36,6 +41,7 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
   const withoutDueRate = percent(summary.withoutDueDate, summary.total);
   const highPriorityRate = percent(summary.highPriorityOpen, summary.total);
   const attention = [...userTasks].filter((task) => task.status !== "DONE").sort((a, b) => attentionScore(b) - attentionScore(a) || new Date(a.dueAt || "2999-01-01") - new Date(b.dueAt || "2999-01-01")).slice(0, 6);
+  const completed = [...userTasks].filter((task) => task.status === "DONE").sort((a, b) => new Date(b.completedAt || b.updatedAt || 0) - new Date(a.completedAt || a.updatedAt || 0)).slice(0, 6);
   const doneRate = percent(summary.done, summary.total);
   const progressRate = percent(summary.inProgress, summary.total);
   const cards = [
@@ -66,7 +72,7 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
 
       <section className="analytics-panel rhythm-panel">
         <header><div><span className="panel-kicker">Ritmo</span><h3>Conclusões no intervalo</h3></div><small>{summary.completedInPeriod} entregas</small></header>
-        <div className="rhythm-chart">{buckets.map((bucket) => <div className="rhythm-column" key={bucket.label}><strong>{bucket.value || ""}</strong><div><i style={{ height: bucket.value ? `${Math.max(12, bucket.value / bucketMax * 100)}%` : "3px" }} /></div><span>{bucket.label}</span></div>)}</div>
+        <div className="rhythm-chart">{buckets.map((bucket) => <div className={`rhythm-column ${bucket.value ? "has-data" : ""}`} key={bucket.label} tabIndex={bucket.value ? 0 : undefined} aria-label={bucket.value ? `${bucket.value} atividades concluídas em ${bucket.label}` : undefined}><strong>{bucket.value || ""}</strong><div><i style={{ height: bucket.value ? `${Math.max(12, bucket.value / bucketMax * 100)}%` : "3px" }} /></div><span>{bucket.label}</span>{bucket.value > 0 && <div className="rhythm-tooltip"><header><span>{period === "week" ? "Concluídas neste dia" : "Concluídas nesta semana"}</span><strong>{bucket.value}</strong></header><div>{bucket.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task)}><CheckCircle2 /><span><strong>{task.title}</strong><small>{completionMoment(task.completedAt, period)}</small></span></button>)}</div></div>}</div>)}</div>
         <p className="chart-note">Conta a data em que a atividade foi marcada como concluída.</p>
       </section>
 
@@ -84,6 +90,11 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
           const late = task.dueAt && new Date(task.dueAt) < new Date().setHours(0, 0, 0, 0);
           return <button key={task.id} onClick={() => onOpenTask(task)}><PriorityPip priority={task.priority} /><span><strong>{task.title}</strong><small><i className={`status-dot status-${task.status.toLowerCase()}`} />{STATUS_LABELS[task.status]}</small></span><time className={late ? "late" : ""}>{late ? "Atrasada · " : ""}{dueText(task.dueAt)}</time></button>;
         })}</div> : <div className="attention-empty"><CheckCircle2 /><strong>Nada exigindo atenção</strong><span>As atividades abertas deste período estão em dia.</span></div>}
+      </section>
+
+      <section className="analytics-panel completed-panel">
+        <header><div><span className="panel-kicker">Radar</span><h3>Atividades concluídas</h3></div><small>{completed.length} exibidas</small></header>
+        {completed.length ? <div className="attention-list completed-list">{completed.map((task) => <button key={task.id} onClick={() => onOpenTask(task)}><span className="completed-marker"><CheckCircle2 /></span><span><strong>{task.title}</strong><small><i className="status-dot status-done" />Concluída</small></span><time>{task.completedAt ? dueText(task.completedAt) : "Sem data"}</time></button>)}</div> : <div className="attention-empty completed-empty"><CircleDashed /><strong>Nenhuma conclusão</strong><span>As atividades concluídas aparecerão aqui.</span></div>}
       </section>
     </div>
 

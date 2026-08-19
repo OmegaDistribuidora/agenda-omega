@@ -64,13 +64,13 @@ export function completionBuckets(tasks, start, end, mode) {
     const label = mode === "week"
       ? bucketStart.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", "")
       : `${bucketStart.getDate()}–${new Date(bucketEnd.getTime() - 1).getDate()}`;
-    return { label, start: bucketStart, end: bucketEnd, value: 0 };
+    return { label, start: bucketStart, end: bucketEnd, value: 0, tasks: [] };
   });
   for (const task of tasks) {
     if (task.status !== "DONE" || !task.completedAt) continue;
     const completedAt = new Date(task.completedAt);
     const bucket = buckets.find((item) => completedAt >= item.start && completedAt < item.end);
-    if (bucket) bucket.value += 1;
+    if (bucket) { bucket.value += 1; bucket.tasks.push(task); }
   }
-  return buckets.map(({ label, value }) => ({ label, value }));
+  return buckets.map(({ label, value, tasks: bucketTasks }) => ({ label, value, tasks: bucketTasks }));
 }

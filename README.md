@@ -13,7 +13,7 @@ Agenda colaborativa interna da Omega. Reúne atividades pessoais e das equipes e
 - lista pessoal, listas por equipe, pastas compartilhadas dentro de cada equipe e busca;
 - visões semana e mês;
 - Kanban com cartões, progresso do checklist, responsáveis e prazo;
-- análise por usuário dentro de cada equipe, com indicadores por período, distribuição por status, ritmo de conclusões e radar de pendências;
+- análise por usuário dentro de cada equipe, com indicadores por período, distribuição por status, ritmo detalhado de conclusões e radares de pendências e entregas;
 - descrição, subtarefas, timeline e anexos de até 10 MB;
 - exclusão lógica, preservando o evento no histórico do banco;
 - administração para criar, editar e excluir equipes e usuários;
