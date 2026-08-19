@@ -280,4 +280,32 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     });
     return reply.code(201).send(attachment);
   });
+
+  app.get("/api/mobile/agenda/attachments/:id/photo", async (request, reply) => {
+    const context = await resolveMobileContext(request, reply);
+    if (!context) return;
+    const attachmentId = Number((request.params as { id?: string }).id);
+    if (!Number.isInteger(attachmentId)) {
+      return reply.code(400).send({ message: "Anexo inválido." });
+    }
+    const attachment = await prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      include: { task: { select: { id: true } } }
+    });
+    if (!attachment || !await ownTask(context, attachment.task.id, reply)) return;
+    if (!attachment.mimeType.toLowerCase().startsWith("image/")) {
+      return reply.code(415).send({ message: "Este anexo não é uma imagem." });
+    }
+    try {
+      const buffer = await fs.readFile(path.join(env.uploadsDir, attachment.storedName));
+      const safeName = attachment.originalName.replace(/[\r\n"\\]/g, "_");
+      return reply
+        .type(attachment.mimeType)
+        .header("Cache-Control", "private, max-age=300")
+        .header("Content-Disposition", `inline; filename="${safeName}"`)
+        .send(buffer);
+    } catch {
+      return reply.code(404).send({ message: "Foto não encontrada no armazenamento." });
+    }
+  });
 }

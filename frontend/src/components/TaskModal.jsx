@@ -8,7 +8,7 @@ import { responsibleOptions } from "../lib/taskUtils";
 const statusNames={TODO:"A fazer",IN_PROGRESS:"Em andamento",DONE:"Concluído"}; const priorityNames={LOW:"Baixa",MEDIUM:"Média",HIGH:"Alta",URGENT:"Urgente"};
 // Estrutura mantida para uma possível retomada futura. Enquanto a flag estiver falsa,
 // comentários, formulários e contadores de conversa não aparecem na interface.
-const COMMENTS_FEATURE_ENABLED = false;
+const COMMENTS_FEATURE_ENABLED = true;
 function inputDate(value){if(!value)return "";const date=new Date(value);return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;}
 function toIso(value){return value?new Date(`${value}T18:00:00`).toISOString():null;}
 function timeAgo(value){const seconds=Math.floor((Date.now()-new Date(value))/1000);if(seconds<60)return "agora";if(seconds<3600)return `há ${Math.floor(seconds/60)} min`;if(seconds<86400)return `há ${Math.floor(seconds/3600)} h`;return new Date(value).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});}
