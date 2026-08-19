@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 — 2026-08-19
+
+### Funcionalidades
+
+- adiciona a visualização **Por usuário** ao lado da Lista e do Kanban nas equipes;
+- permite selecionar qualquer membro da equipe para analisar sua carteira;
+- apresenta total, tarefas a fazer, em andamento, concluídas, atrasadas e taxa de conclusão;
+- inclui gráficos de distribuição por status e ritmo de conclusões no período;
+- adiciona indicadores de prazo cumprido, atividades sem prazo e prioridades altas abertas;
+- mantém atividades sem prazo em todos os períodos semanal e mensal;
+- oferece radar clicável das atividades que mais pedem atenção;
+- adapta todo o painel para desktop, tablet e celular.
+
 ## 1.1.0 — 2026-08-18
 
 ### Funcionalidades

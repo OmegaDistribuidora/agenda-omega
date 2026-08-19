@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { completionPercentage, matchesTaskScope, nextStatus, resolveTeamContext } from "../src/lib/taskUtils.js";
+import { buildUserAnalytics, completionBuckets, completionPercentage, isTaskInPeriod, matchesTaskScope, nextStatus, resolveTeamContext, tasksForUserPeriod } from "../src/lib/taskUtils.js";
 import { clipboardImageFiles, imageExtension } from "../src/lib/clipboard.js";
 
 test("o botão rápido percorre os três estados", () => {
@@ -51,4 +51,41 @@ test("reconhece imagens disponíveis no clipboard sem duplicar", () => {
   assert.deepEqual(clipboardImageFiles(clipboard), [image]);
   assert.equal(imageExtension("image/jpeg"), "jpg");
   assert.equal(imageExtension("image/svg+xml"), "svg");
+});
+
+test("análise por usuário inclui atividades sem prazo em qualquer período", () => {
+  const start = new Date("2026-08-17T00:00:00-03:00");
+  const end = new Date("2026-08-24T00:00:00-03:00");
+  const assignment = { user: { id: 10 } };
+  const tasks = [
+    { id: 1, teamId: 2, dueAt: null, status: "TODO", priority: "MEDIUM", assignees: [assignment] },
+    { id: 2, teamId: 2, dueAt: "2026-08-19T12:00:00-03:00", status: "DONE", completedAt: "2026-08-18T10:00:00-03:00", priority: "HIGH", assignees: [assignment] },
+    { id: 3, teamId: 2, dueAt: "2026-09-01T12:00:00-03:00", status: "TODO", priority: "LOW", assignees: [assignment] }
+  ];
+  assert.equal(isTaskInPeriod(tasks[0], start, end), true);
+  assert.deepEqual(tasksForUserPeriod(tasks, 2, 10, start, end).map((task) => task.id), [1, 2]);
+});
+
+test("calcula indicadores individuais sem conceder peso extra a tarefas sem prazo", () => {
+  const start = new Date("2026-08-17T00:00:00-03:00");
+  const end = new Date("2026-08-24T00:00:00-03:00");
+  const summary = buildUserAnalytics([
+    { status: "TODO", dueAt: null, priority: "URGENT" },
+    { status: "IN_PROGRESS", dueAt: "2026-08-18T12:00:00-03:00", priority: "MEDIUM" },
+    { status: "DONE", dueAt: "2026-08-22T12:00:00-03:00", completedAt: "2026-08-20T12:00:00-03:00", priority: "LOW" },
+    { status: "DONE", dueAt: null, completedAt: "2026-08-21T12:00:00-03:00", priority: "LOW" }
+  ], start, end, new Date("2026-08-19T12:00:00-03:00"));
+  assert.deepEqual(summary, { total: 4, todo: 1, inProgress: 1, done: 2, overdue: 1, withoutDueDate: 2, highPriorityOpen: 1, completedInPeriod: 2, completionRate: 50, onTimeRate: 100 });
+});
+
+test("agrupa conclusões por dia na visão semanal", () => {
+  const start = new Date("2026-08-17T00:00:00-03:00");
+  const end = new Date("2026-08-24T00:00:00-03:00");
+  const buckets = completionBuckets([
+    { status: "DONE", completedAt: "2026-08-17T10:00:00-03:00" },
+    { status: "DONE", completedAt: "2026-08-17T15:00:00-03:00" },
+    { status: "DONE", completedAt: "2026-08-19T09:00:00-03:00" },
+    { status: "TODO", completedAt: null }
+  ], start, end, "week");
+  assert.deepEqual(buckets.map((bucket) => bucket.value), [2, 0, 1, 0, 0, 0, 0]);
 });
