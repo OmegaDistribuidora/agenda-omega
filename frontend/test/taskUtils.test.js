@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUserAnalytics, completionBuckets, completionPercentage, isTaskInPeriod, matchesTaskScope, nextStatus, resolveTeamContext, tasksForUserPeriod } from "../src/lib/taskUtils.js";
+import { buildUserAnalytics, completionBuckets, completionPercentage, isTaskInPeriod, matchesTaskScope, nextStatus, resolveTeamContext, responsibleOptions, tasksForUserPeriod } from "../src/lib/taskUtils.js";
 import { clipboardImageFiles, imageExtension } from "../src/lib/clipboard.js";
 
 test("o botão rápido percorre os três estados", () => {
@@ -21,6 +21,13 @@ test("resolve a equipe padrão pelo contexto atual", () => {
   assert.equal(resolveTeamContext("folder:7", folders, teams), 20);
   assert.equal(resolveTeamContext("mine", folders, [{ id: 10 }]), 10);
   assert.equal(resolveTeamContext("mine", folders, teams), null);
+});
+
+test("administrador pode retirar a própria atribuição mesmo sem integrar a equipe", () => {
+  const admin = { id: 1, displayName: "Administrador", role: "ADMIN", active: true };
+  const member = { id: 2, displayName: "Colaborador", role: "USER", active: true };
+  assert.deepEqual(responsibleOptions([member], [admin, member], admin, [admin.id]).map((person) => person.id), [2, 1]);
+  assert.deepEqual(responsibleOptions([member], [admin, member], admin, []).map((person) => person.id), [2, 1]);
 });
 
 test("separa atividades pessoais e mantém a visão completa da equipe", () => {

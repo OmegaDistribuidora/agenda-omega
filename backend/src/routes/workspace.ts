@@ -6,6 +6,7 @@ import { z } from "zod";
 import prisma from "../lib/prisma";
 import { env } from "../config";
 import { hashPassword, isAdminRole, requireAdmin, requireAuth } from "../lib/security";
+import { resolveInitialAssigneeIds } from "../lib/workflowRules";
 
 const taskInclude = {
   creator: { select: { id: true, displayName: true, username: true, avatarColor: true } },
@@ -73,7 +74,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       title: parsed.data.title, description: parsed.data.description || null, teamId: parsed.data.teamId, folderId: parsed.data.folderId || null,
       status: parsed.data.status || "TODO", priority: parsed.data.priority || "MEDIUM", dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
       position: (max._max.position || 0) + 1, creatorId: request.authUser!.userId,
-      assignees: { create: (parsed.data.assigneeIds?.length ? parsed.data.assigneeIds : [request.authUser!.userId]).map((userId) => ({ userId })) },
+      assignees: { create: resolveInitialAssigneeIds(parsed.data.assigneeIds, request.authUser!.userId).map((userId) => ({ userId })) },
       tags: { create: (parsed.data.tagIds || []).map((tagId) => ({ tagId })) },
       activity: { create: { actorId: request.authUser!.userId, action: "CREATED", summary: "criou a atividade" } }
     }, include: taskInclude });
@@ -96,10 +97,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { assigneeIds, tagIds, dueAt, ...scalar } = parsed.data;
     const statusNames: Record<string, string> = { TODO: "A fazer", IN_PROGRESS: "Em andamento", DONE: "Concluído" };
     await prisma.$transaction(async (tx) => {
-      if (assigneeIds) { await tx.taskAssignee.deleteMany({ where: { taskId: id } }); if (assigneeIds.length) await tx.taskAssignee.createMany({ data: assigneeIds.map((userId) => ({ taskId: id, userId })), skipDuplicates: true }); }
+      if (assigneeIds !== undefined) { await tx.taskAssignee.deleteMany({ where: { taskId: id } }); if (assigneeIds.length) await tx.taskAssignee.createMany({ data: assigneeIds.map((userId) => ({ taskId: id, userId })), skipDuplicates: true }); }
       if (tagIds) { await tx.taskTag.deleteMany({ where: { taskId: id } }); if (tagIds.length) await tx.taskTag.createMany({ data: tagIds.map((tagId) => ({ taskId: id, tagId })), skipDuplicates: true }); }
       await tx.task.update({ where: { id }, data: { ...scalar, ...(parsed.data.teamId && parsed.data.teamId !== existing.teamId && parsed.data.folderId === undefined ? { folderId: null } : {}), ...(dueAt !== undefined ? { dueAt: dueAt ? new Date(dueAt) : null } : {}), ...(statusChanged ? { completedAt: parsed.data.status === "DONE" ? new Date() : null } : {}) } });
-      await tx.activityLog.create({ data: { taskId: id, actorId: request.authUser!.userId, action: statusChanged ? "STATUS_CHANGED" : assigneeIds ? "ASSIGNEE_CHANGED" : "UPDATED", summary: statusChanged ? `alterou o status para “${statusNames[parsed.data.status!]}”` : assigneeIds ? "alterou os responsáveis" : "atualizou a atividade", metadata: { changes: Object.keys(parsed.data) } } });
+      await tx.activityLog.create({ data: { taskId: id, actorId: request.authUser!.userId, action: statusChanged ? "STATUS_CHANGED" : assigneeIds !== undefined ? "ASSIGNEE_CHANGED" : "UPDATED", summary: statusChanged ? `alterou o status para “${statusNames[parsed.data.status!]}”` : assigneeIds !== undefined ? "alterou os responsáveis" : "atualizou a atividade", metadata: { changes: Object.keys(parsed.data) } } });
     });
     return prisma.task.findUnique({ where: { id }, include: taskInclude });
   });

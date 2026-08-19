@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 — 2026-08-19
+
+### Correções
+
+- impede que a equipe de demonstração **Operações** seja criada em produção a cada atualização;
+- permite que o administrador apareça entre os responsáveis mesmo sem ser membro formal da equipe;
+- permite salvar uma atividade sem responsáveis quando o administrador remove a própria atribuição;
+- preserva a atribuição automática ao criador apenas quando nenhuma escolha de responsáveis foi enviada.
+
 ## 1.3.0 — 2026-08-19
 
 ### Funcionalidades

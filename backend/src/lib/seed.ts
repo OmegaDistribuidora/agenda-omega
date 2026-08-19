@@ -1,6 +1,7 @@
 import prisma from "./prisma";
 import { env } from "../config";
 import { hashPassword } from "./security";
+import { shouldCreateDemoWorkspace } from "./workflowRules";
 
 const colors = ["#e56545", "#3f7f75", "#7b63a6", "#d9a441"];
 
@@ -11,12 +12,14 @@ export async function ensureBootstrapData() {
     update: { displayName: env.adminDisplayName, active: true },
     create: { username: env.adminUsername, displayName: env.adminDisplayName, email: "admin@omega.local", passwordHash, role: "ADMIN", avatarColor: colors[0] }
   });
+  if (!shouldCreateDemoWorkspace(env.nodeEnv)) return;
+
   const team = await prisma.team.upsert({
     where: { name: "Operações" }, update: {},
     create: { name: "Operações", description: "Rotinas e projetos internos", color: "#3f7f75" }
   });
   await prisma.teamMember.upsert({ where: { userId_teamId: { userId: admin.id, teamId: team.id } }, update: { role: "LEAD" }, create: { userId: admin.id, teamId: team.id, role: "LEAD" } });
-  if (env.nodeEnv === "production" || await prisma.task.count()) return;
+  if (await prisma.task.count()) return;
 
   const users = [];
   for (const [index, info] of [["joao", "João Martins"], ["william", "William Alves"], ["ana", "Ana Clara"]].entries()) {

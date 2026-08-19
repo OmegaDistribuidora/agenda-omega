@@ -7,6 +7,17 @@ export function resolveTeamContext(scope, folders = [], teams = []) {
   return teams.length === 1 ? teams[0].id : null;
 }
 
+export function responsibleOptions(teamMembers = [], users = [], currentUser, selectedIds = []) {
+  const selectedOutsideTeam = users.filter((person) => selectedIds.includes(person.id));
+  const candidates = [...teamMembers, ...selectedOutsideTeam, ...(currentUser?.role === "ADMIN" ? [currentUser] : [])];
+  const seen = new Set();
+  return candidates.filter((person) => {
+    if (!person || person.active === false || seen.has(person.id)) return false;
+    seen.add(person.id);
+    return true;
+  });
+}
+
 export function matchesTaskScope(task, scope, userId) {
   if (scope === "mine") return task.assignees.some((assignment) => assignment.user.id === userId);
   if (scope.startsWith("team:")) return task.teamId === Number(scope.split(":")[1]);
