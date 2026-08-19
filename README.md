@@ -108,6 +108,8 @@ ECOSYSTEM_SSO_ISSUER=ecosistema-omega
 ECOSYSTEM_SSO_AUDIENCE=agenda-omega
 ECOSYSTEM_SSO_SHARED_SECRET=<segredo-compartilhado-com-o-ecossistema>
 ECOSYSTEM_SSO_ADMIN_USERS=<logins-admin-do-ecossistema-separados-por-virgula>
+GESTAO_VENDAS_SUPABASE_URL=https://ewkexlyywmvufbirmpot.supabase.co
+GESTAO_VENDAS_SUPABASE_PUBLISHABLE_KEY=<chave-publishable-do-projeto>
 ```
 
 O Railway fornece `PORT` automaticamente. Monte um volume persistente em `/uploads`. `JWT_SECRET` e `ECOSYSTEM_SSO_SHARED_SECRET` devem ser valores fortes e diferentes.
@@ -166,3 +168,11 @@ npm run seed             # garante dados iniciais fora de produção
 - A estrutura de comentários permanece no banco e na API para uso futuro, mas está oculta na interface por uma feature flag.
 - Excluir uma pasta preserva suas tarefas na raiz da equipe; excluir uma equipe remove definitivamente todo o conteúdo pertencente a ela.
 - Credenciais e arquivos enviados ficam fora do Git.
+
+## Integração móvel com o Gestão de Vendas
+
+As rotas em `/api/mobile/agenda` validam a sessão Supabase do Gestão de Vendas,
+relacionam o usuário pelo código e aceitam somente os perfis Supervisor e
+Coordenador cadastrados na Agenda. O aplicativo pode listar apenas atividades
+atribuídas ao próprio usuário, avançar o status, adicionar observações e enviar
+fotos. Criação, edição administrativa e exclusão continuam restritas ao painel web.

@@ -9,6 +9,7 @@ import prisma from "./lib/prisma";
 import { ensureBootstrapData } from "./lib/seed";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerWorkspaceRoutes } from "./routes/workspace";
+import { registerMobileAgendaRoutes } from "./routes/mobileAgenda";
 import type { AuthUser } from "./types";
 
 declare module "fastify" { interface FastifyRequest { authUser?: AuthUser } }
@@ -18,7 +19,7 @@ async function bootstrap() {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
   fs.mkdirSync(env.uploadsDir, { recursive: true });
   app.get("/api/health", async () => ({ status: "ok", service: "agenda-omega" }));
-  await registerAuthRoutes(app); await registerWorkspaceRoutes(app);
+  await registerAuthRoutes(app); await registerWorkspaceRoutes(app); await registerMobileAgendaRoutes(app);
   await prisma.$connect(); await ensureBootstrapData();
   const frontendDist = path.resolve(__dirname, "..", "..", "frontend", "dist");
   if (fs.existsSync(frontendDist)) {

@@ -30,5 +30,9 @@ export const env = {
     audience: optional("ECOSYSTEM_SSO_AUDIENCE") || "agenda-omega",
     sharedSecret: optional("ECOSYSTEM_SSO_SHARED_SECRET"),
     adminUsers: list(optional("ECOSYSTEM_SSO_ADMIN_USERS"))
+  },
+  gestaoVendas: {
+    supabaseUrl: optional("GESTAO_VENDAS_SUPABASE_URL") || "https://ewkexlyywmvufbirmpot.supabase.co",
+    supabasePublishableKey: optional("GESTAO_VENDAS_SUPABASE_PUBLISHABLE_KEY") || "sb_publishable_vQyCQEU5hh_HHMRAy798Ig_Pwfiox9U"
   }
 };
