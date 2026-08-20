@@ -7,6 +7,7 @@ import prisma from "../lib/prisma";
 import { env } from "../config";
 import { hashPassword, isAdminRole, requireAdmin, requireAuth } from "../lib/security";
 import { resolveInitialAssigneeIds } from "../lib/workflowRules";
+import { agendaRegions, isRestrictedAgendaRole, resolveAgendaPlacement } from "../lib/agendaAccess";
 
 const taskInclude = {
   creator: { select: { id: true, displayName: true, username: true, avatarColor: true } },
@@ -31,6 +32,10 @@ async function getAccessibleTask(request: FastifyRequest, reply: FastifyReply, t
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: taskInclude });
   if (!task || task.deletedAt) { reply.code(404).send({ message: "Atividade não encontrada." }); return null; }
   if (!await requireTeamAccess(request, reply, task.teamId)) return null;
+  if (isRestrictedAgendaRole(request.authUser!.role) && !task.assignees.some((item) => item.user.id === request.authUser!.userId)) {
+    reply.code(404).send({ message: "Atividade não encontrada entre as suas atribuições." });
+    return null;
+  }
   return task;
 }
 async function folderBelongsToTeam(reply: FastifyReply, folderId: number | null | undefined, teamId: number) {
@@ -39,17 +44,18 @@ async function folderBelongsToTeam(reply: FastifyReply, folderId: number | null 
   if (!folder || folder.teamId !== teamId) { reply.code(400).send({ message: "A pasta selecionada não pertence à equipe da atividade." }); return false; }
   return true;
 }
-const person = { select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true } } as const;
+const person = { select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true, agendaRegion: true } } as const;
 
 export async function registerWorkspaceRoutes(app: FastifyInstance) {
   app.get("/api/bootstrap", { preHandler: [requireAuth] }, async (request) => {
     const teamIds = await allowedTeamIds(request);
+    const restricted = isRestrictedAgendaRole(request.authUser!.role);
     const [teams, users, folders, tags, tasks] = await Promise.all([
       prisma.team.findMany({ where: { id: { in: teamIds } }, include: { members: { include: { user: person } } }, orderBy: { name: "asc" } }),
-      prisma.user.findMany({ where: isAdminRole(request.authUser!.role) ? {} : { active: true, teamLinks: { some: { teamId: { in: teamIds } } } }, select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true }, orderBy: { displayName: "asc" } }),
+      prisma.user.findMany({ where: isAdminRole(request.authUser!.role) ? {} : restricted ? { id: request.authUser!.userId } : { active: true, teamLinks: { some: { teamId: { in: teamIds } } } }, select: { id: true, username: true, displayName: true, code: true, email: true, avatarColor: true, role: true, active: true, agendaRegion: true }, orderBy: { displayName: "asc" } }),
       prisma.folder.findMany({ where: { teamId: { in: teamIds } }, orderBy: [{ teamId: "asc" }, { name: "asc" }] }),
       prisma.tag.findMany({ where: { teamId: { in: teamIds } }, orderBy: { name: "asc" } }),
-      prisma.task.findMany({ where: { teamId: { in: teamIds }, deletedAt: null }, include: taskInclude, orderBy: [{ position: "asc" }, { createdAt: "desc" }] })
+      prisma.task.findMany({ where: { teamId: { in: teamIds }, deletedAt: null, ...(restricted ? { assignees: { some: { userId: request.authUser!.userId } } } : {}) }, include: taskInclude, orderBy: [{ position: "asc" }, { createdAt: "desc" }] })
     ]);
     return { teams, users, folders, tags, tasks };
   });
@@ -61,20 +67,33 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   app.post("/api/tasks", { preHandler: [requireAuth] }, async (request, reply) => {
     const schema = z.object({
       title: z.string().trim().min(1).max(180), description: z.string().max(10000).optional().nullable(),
-      teamId: z.number().int().positive(), folderId: z.number().int().positive().optional().nullable(),
+      teamId: z.number().int().positive().optional(), folderId: z.number().int().positive().optional().nullable(),
       status: z.enum(["TODO", "IN_PROGRESS", "DONE"]).optional(), priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
       dueAt: z.string().datetime().optional().nullable(), assigneeIds: z.array(z.number().int().positive()).optional(), tagIds: z.array(z.number().int().positive()).optional()
     });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: parsed.error.issues[0]?.message || "Dados inválidos." });
-    if (!await requireTeamAccess(request, reply, parsed.data.teamId)) return;
-    if (!await folderBelongsToTeam(reply, parsed.data.folderId, parsed.data.teamId)) return;
-    const max = await prisma.task.aggregate({ where: { teamId: parsed.data.teamId, status: parsed.data.status || "TODO" }, _max: { position: true } });
+    const restricted = isRestrictedAgendaRole(request.authUser!.role);
+    let teamId = parsed.data.teamId;
+    let folderId = parsed.data.folderId || null;
+    if (restricted) {
+      try {
+        const placement = await resolveAgendaPlacement(request.authUser!.userId);
+        teamId = placement.teamId;
+        folderId = placement.folderId;
+      } catch (error) {
+        return reply.code(422).send({ message: error instanceof Error ? error.message : "Não foi possível identificar a região do usuário." });
+      }
+    }
+    if (!teamId) return reply.code(400).send({ message: "Selecione uma equipe." });
+    if (!await requireTeamAccess(request, reply, teamId)) return;
+    if (!await folderBelongsToTeam(reply, folderId, teamId)) return;
+    const max = await prisma.task.aggregate({ where: { teamId, status: parsed.data.status || "TODO" }, _max: { position: true } });
     const task = await prisma.task.create({ data: {
-      title: parsed.data.title, description: parsed.data.description || null, teamId: parsed.data.teamId, folderId: parsed.data.folderId || null,
+      title: parsed.data.title, description: parsed.data.description || null, teamId, folderId,
       status: parsed.data.status || "TODO", priority: parsed.data.priority || "MEDIUM", dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
       position: (max._max.position || 0) + 1, creatorId: request.authUser!.userId,
-      assignees: { create: resolveInitialAssigneeIds(parsed.data.assigneeIds, request.authUser!.userId).map((userId) => ({ userId })) },
+      assignees: { create: (restricted ? [request.authUser!.userId] : resolveInitialAssigneeIds(parsed.data.assigneeIds, request.authUser!.userId)).map((userId) => ({ userId })) },
       tags: { create: (parsed.data.tagIds || []).map((tagId) => ({ tagId })) },
       activity: { create: { actorId: request.authUser!.userId, action: "CREATED", summary: "criou a atividade" } }
     }, include: taskInclude });
@@ -91,6 +110,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       assigneeIds: z.array(z.number().int().positive()).optional(), tagIds: z.array(z.number().int().positive()).optional()
     });
     const parsed = schema.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ message: parsed.error.issues[0]?.message || "Dados inválidos." });
+    if (isRestrictedAgendaRole(request.authUser!.role) && (parsed.data.teamId !== undefined || parsed.data.folderId !== undefined || parsed.data.assigneeIds !== undefined)) {
+      return reply.code(403).send({ message: "Supervisores e Coordenadores não podem alterar equipe, pasta ou responsável." });
+    }
     if (parsed.data.teamId && !await requireTeamAccess(request, reply, parsed.data.teamId)) return;
     if (!await folderBelongsToTeam(reply, parsed.data.folderId, parsed.data.teamId || existing.teamId)) return;
     const statusChanged = parsed.data.status && parsed.data.status !== existing.status;
@@ -106,6 +128,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.delete("/api/tasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {
+    if (isRestrictedAgendaRole(request.authUser!.role)) return reply.code(403).send({ message: "Supervisores e Coordenadores não podem excluir atividades." });
     const id = Number((request.params as any).id); const task = await getAccessibleTask(request, reply, id); if (!task) return;
     await prisma.$transaction([prisma.activityLog.create({ data: { taskId: id, actorId: request.authUser!.userId, action: "DELETED", summary: "excluiu a atividade" } }), prisma.task.update({ where: { id }, data: { deletedAt: new Date() } })]);
     return reply.code(204).send();
@@ -130,14 +153,14 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
 
   app.patch("/api/subtasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {
     const id = Number((request.params as any).id); const subtask = await prisma.subtask.findUnique({ where: { id }, include: { task: true } });
-    if (!subtask || !await requireTeamAccess(request, reply, subtask.task.teamId)) return;
+    if (!subtask || !await getAccessibleTask(request, reply, subtask.taskId)) return;
     const parsed = z.object({ title: z.string().trim().min(1).max(180).optional(), completed: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return reply.code(400).send({ message: "Dados inválidos." });
     const result = await prisma.subtask.update({ where: { id }, data: parsed.data }); await prisma.activityLog.create({ data: { taskId: subtask.taskId, actorId: request.authUser!.userId, action: "SUBTASK_CHANGED", summary: parsed.data.completed ? `concluiu “${subtask.title}”` : `atualizou “${subtask.title}”` } }); return result;
   });
 
   app.delete("/api/subtasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {
     const id = Number((request.params as any).id); const subtask = await prisma.subtask.findUnique({ where: { id }, include: { task: true } });
-    if (!subtask || !await requireTeamAccess(request, reply, subtask.task.teamId)) return;
+    if (!subtask || !await getAccessibleTask(request, reply, subtask.taskId)) return;
     await prisma.subtask.delete({ where: { id } }); await prisma.activityLog.create({ data: { taskId: subtask.taskId, actorId: request.authUser!.userId, action: "SUBTASK_CHANGED", summary: `removeu a subtarefa “${subtask.title}”` } }); return reply.code(204).send();
   });
 
@@ -150,14 +173,14 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.delete("/api/attachments/:id", { preHandler: [requireAuth] }, async (request, reply) => {
-    const id = Number((request.params as any).id); const item = await prisma.attachment.findUnique({ where: { id }, include: { task: true } }); if (!item || !await requireTeamAccess(request, reply, item.task.teamId)) return;
+    const id = Number((request.params as any).id); const item = await prisma.attachment.findUnique({ where: { id }, include: { task: true } }); if (!item || !await getAccessibleTask(request, reply, item.taskId)) return;
     await prisma.attachment.delete({ where: { id } }); await fs.unlink(path.join(env.uploadsDir, item.storedName)).catch(() => undefined); await prisma.activityLog.create({ data: { taskId: item.taskId, actorId: request.authUser!.userId, action: "ATTACHMENT_REMOVED", summary: `removeu o anexo “${item.originalName}”` } }); return reply.code(204).send();
   });
 
   app.get("/api/attachments/:id/download", { preHandler: [requireAuth] }, async (request, reply) => {
     const id = Number((request.params as any).id); const item = await prisma.attachment.findUnique({ where: { id }, include: { task: true } });
     if (!item) return reply.code(404).send({ message: "Anexo não encontrado." });
-    if (!await requireTeamAccess(request, reply, item.task.teamId)) return;
+    if (!await getAccessibleTask(request, reply, item.taskId)) return;
     try {
       const buffer = await fs.readFile(path.join(env.uploadsDir, item.storedName));
       const safeName = item.originalName.replace(/[\r\n"\\]/g, "_");
@@ -166,11 +189,13 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/folders", { preHandler: [requireAuth] }, async (request, reply) => {
+    if (isRestrictedAgendaRole(request.authUser!.role)) return reply.code(403).send({ message: "Supervisores e Coordenadores não podem criar pastas." });
     const parsed = z.object({ name: z.string().trim().min(1).max(80), color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), teamId: z.number().int().positive() }).safeParse(request.body); if (!parsed.success) return reply.code(400).send({ message: "Nome e equipe da pasta são obrigatórios." });
     if (!await requireTeamAccess(request, reply, parsed.data.teamId)) return; return reply.code(201).send(await prisma.folder.create({ data: { ...parsed.data, ownerId: request.authUser!.userId } }));
   });
 
   app.delete("/api/folders/:id", { preHandler: [requireAuth] }, async (request, reply) => {
+    if (isRestrictedAgendaRole(request.authUser!.role)) return reply.code(403).send({ message: "Supervisores e Coordenadores não podem excluir pastas." });
     const id = Number((request.params as any).id); const folder = await prisma.folder.findUnique({ where: { id } });
     if (!folder) return reply.code(404).send({ message: "Pasta não encontrada." });
     if (!await requireTeamAccess(request, reply, folder.teamId)) return;

@@ -5,12 +5,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../config";
 import prisma from "../lib/prisma";
+import { agendaRegionForCoordinator, syncAgendaUserRegion } from "../lib/agendaAccess";
 
 type AppIdentity = {
   authUserId: string;
   code: string;
   displayName: string | null;
   profileSlug: "supervisor" | "coordenador" | "diretoria" | "outros";
+  coordinatorCode: string | null;
 };
 
 type MobileContext = AppIdentity & {
@@ -19,7 +21,7 @@ type MobileContext = AppIdentity & {
     displayName: string;
     code: string | null;
     role: "SUPERVISOR" | "COORDINATOR";
-  };
+  } | null;
 };
 
 const allowedAppProfiles = new Set(["supervisor", "coordenador", "diretoria", "outros"]);
@@ -62,7 +64,7 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
     const authUser = await supabaseRequest<{ id?: string }>("/auth/v1/user", token);
     if (!authUser.id) throw new Error("Usuário autenticado sem identificador");
     const query = new URLSearchParams({
-      select: "code,display_name,is_active,app_profiles!inner(slug)",
+      select: "code,display_name,is_active,coordinator_code,app_profiles!inner(slug)",
       auth_user_id: `eq.${authUser.id}`,
       limit: "1"
     });
@@ -70,6 +72,7 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
       code?: string;
       display_name?: string | null;
       is_active?: boolean;
+      coordinator_code?: string | null;
       app_profiles?: { slug?: string } | Array<{ slug?: string }>;
     }>>(`/rest/v1/app_users?${query.toString()}`, token);
     const row = rows[0];
@@ -84,7 +87,7 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
       reply.code(403).send({ message: "A Agenda não está disponível para este perfil." });
       return null;
     }
-    if (!code) {
+    if (!code && profileSlug !== "diretoria" && profileSlug !== "outros") {
       reply.code(422).send({ message: "Seu usuário não possui código para integração com a Agenda." });
       return null;
     }
@@ -92,7 +95,8 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
       authUserId: authUser.id,
       code,
       displayName: row.display_name || null,
-      profileSlug: profileSlug as AppIdentity["profileSlug"]
+      profileSlug: profileSlug as AppIdentity["profileSlug"],
+      coordinatorCode: String(row.coordinator_code || "").trim() || null
     };
   } catch (error) {
     request.log.warn({ error }, "Falha ao validar sessão do Gestão de Vendas");
@@ -110,6 +114,9 @@ function acceptedAgendaRoles(profileSlug: AppIdentity["profileSlug"]) {
 async function resolveMobileContext(request: FastifyRequest, reply: FastifyReply): Promise<MobileContext | null> {
   const identity = await resolveAppIdentity(request, reply);
   if (!identity) return null;
+  if (identity.profileSlug === "diretoria" || identity.profileSlug === "outros") {
+    return { ...identity, agendaUser: null };
+  }
   const users = await prisma.user.findMany({
     where: {
       active: true,
@@ -129,16 +136,22 @@ async function resolveMobileContext(request: FastifyRequest, reply: FastifyReply
     reply.code(409).send({ message: `Existe mais de um usuário da Agenda com o código ${identity.code}.` });
     return null;
   }
-  return { ...identity, agendaUser: users[0] as MobileContext["agendaUser"] };
+  const agendaUser = users[0] as NonNullable<MobileContext["agendaUser"]>;
+  const coordinatorCode = identity.profileSlug === "coordenador" ? identity.code : identity.coordinatorCode;
+  const region = agendaRegionForCoordinator(coordinatorCode);
+  if (region) await syncAgendaUserRegion(agendaUser.id, region);
+  return { ...identity, agendaUser };
 }
 
-function saoPauloPeriodBounds(period: "week" | "month", anchor: string) {
+function saoPauloPeriodBounds(period: "today" | "week" | "month", anchor: string) {
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(anchor) ? new Date(`${anchor}T12:00:00-03:00`) : new Date();
   const local = new Date(parsed.getTime() - 3 * 60 * 60 * 1000);
   let year = local.getUTCFullYear();
   let month = local.getUTCMonth();
   let day = local.getUTCDate();
-  if (period === "week") {
+  if (period === "today") {
+    // Mantém o próprio dia selecionado.
+  } else if (period === "week") {
     const weekDay = (local.getUTCDay() + 6) % 7;
     day -= weekDay;
   } else {
@@ -146,12 +159,17 @@ function saoPauloPeriodBounds(period: "week" | "month", anchor: string) {
   }
   const start = new Date(Date.UTC(year, month, day, 3, 0, 0));
   const end = new Date(start);
-  if (period === "week") end.setUTCDate(end.getUTCDate() + 7);
+  if (period === "today") end.setUTCDate(end.getUTCDate() + 1);
+  else if (period === "week") end.setUTCDate(end.getUTCDate() + 7);
   else end.setUTCMonth(end.getUTCMonth() + 1);
   return { start, end };
 }
 
 async function ownTask(context: MobileContext, taskId: number, reply: FastifyReply) {
+  if (!context.agendaUser) {
+    reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
+    return null;
+  }
   const task = await prisma.task.findFirst({
     where: { id: taskId, deletedAt: null, assignees: { some: { userId: context.agendaUser.id } } },
     include: mobileTaskInclude
@@ -165,31 +183,99 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     const context = await resolveMobileContext(request, reply);
     if (!context) return;
     const parsed = z.object({
-      period: z.enum(["week", "month"]).default("week"),
-      anchor: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+      period: z.enum(["today", "week", "month"]).default("today"),
+      anchor: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      ownerCode: z.string().trim().max(40).optional(),
+      ownerRole: z.enum(["SUPERVISOR", "COORDINATOR"]).optional()
     }).safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ message: "Período inválido." });
     const anchor = parsed.data.anchor || new Date().toISOString().slice(0, 10);
     const { start, end } = saoPauloPeriodBounds(parsed.data.period, anchor);
+    const owners = await prisma.user.findMany({
+      where: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] }, code: { not: null } },
+      select: { id: true, displayName: true, code: true, role: true },
+      orderBy: [{ role: "asc" }, { displayName: "asc" }, { code: "asc" }]
+    }) as Array<NonNullable<MobileContext["agendaUser"]>>;
+    let selectedUser = context.agendaUser;
+    if (!selectedUser) {
+      if (parsed.data.ownerCode || parsed.data.ownerRole) {
+        selectedUser = owners.find((owner) =>
+          (!parsed.data.ownerCode || String(owner.code || "").toLocaleLowerCase("pt-BR") === parsed.data.ownerCode!.toLocaleLowerCase("pt-BR")) &&
+          (!parsed.data.ownerRole || owner.role === parsed.data.ownerRole)
+        ) || null;
+        if (!selectedUser) return reply.code(404).send({ message: "O Supervisor ou Coordenador selecionado não foi encontrado." });
+      } else {
+        selectedUser = owners[0] || null;
+      }
+    }
+    if (!selectedUser) return reply.code(404).send({ message: "Nenhum Supervisor ou Coordenador ativo foi encontrado na Agenda." });
     const tasks = await prisma.task.findMany({
       where: {
         deletedAt: null,
-        assignees: { some: { userId: context.agendaUser.id } },
+        assignees: { some: { userId: selectedUser.id } },
         OR: [{ dueAt: null }, { dueAt: { gte: start, lt: end } }]
       },
       include: mobileTaskInclude,
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { position: "asc" }, { createdAt: "desc" }]
     });
     return {
-      user: context.agendaUser,
+      viewer: {
+        profileSlug: context.profileSlug,
+        canCreate: Boolean(context.agendaUser),
+        canEdit: Boolean(context.agendaUser),
+        canSelectOwner: !context.agendaUser
+      },
+      user: selectedUser,
+      owners: context.agendaUser ? [] : owners,
       period: { type: parsed.data.period, anchor, start: start.toISOString(), end: end.toISOString() },
       tasks
     };
   });
 
+  app.post("/api/mobile/agenda/tasks", async (request, reply) => {
+    const context = await resolveMobileContext(request, reply);
+    if (!context) return;
+    if (!context.agendaUser) return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
+    const parsed = z.object({
+      title: z.string().trim().min(1).max(180),
+      description: z.string().trim().max(10000).optional().nullable(),
+      dueAt: z.string().datetime().optional().nullable(),
+      priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM")
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: parsed.error.issues[0]?.message || "Dados inválidos." });
+    const coordinatorCode = context.profileSlug === "coordenador" ? context.code : context.coordinatorCode;
+    const region = agendaRegionForCoordinator(coordinatorCode);
+    if (!region) return reply.code(422).send({ message: "Não foi possível identificar a região deste usuário." });
+    await syncAgendaUserRegion(context.agendaUser.id, region);
+    const team = await prisma.team.findFirst({ where: { name: { equals: "Comercial Externo", mode: "insensitive" } } });
+    if (!team) return reply.code(422).send({ message: "A equipe Comercial Externo não foi encontrada na Agenda." });
+    const folder = await prisma.folder.findFirst({ where: { teamId: team.id, name: { equals: region, mode: "insensitive" } } });
+    if (!folder) return reply.code(422).send({ message: `A pasta ${region} não foi encontrada na equipe Comercial Externo.` });
+    const max = await prisma.task.aggregate({ where: { teamId: team.id, status: "TODO" }, _max: { position: true } });
+    const task = await prisma.task.create({
+      data: {
+        title: parsed.data.title,
+        description: parsed.data.description || null,
+        teamId: team.id,
+        folderId: folder.id,
+        status: "TODO",
+        priority: parsed.data.priority,
+        dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
+        position: (max._max.position || 0) + 1,
+        creatorId: context.agendaUser.id,
+        assignees: { create: { userId: context.agendaUser.id } },
+        activity: { create: { actorId: context.agendaUser.id, action: "CREATED", summary: "criou a atividade pelo aplicativo Gestão de Vendas", metadata: { source: "gestao-vendas-mobile", authUserId: context.authUserId, region } } }
+      },
+      include: mobileTaskInclude
+    });
+    return reply.code(201).send(task);
+  });
+
   app.patch("/api/mobile/agenda/tasks/:id/status", async (request, reply) => {
     const context = await resolveMobileContext(request, reply);
     if (!context) return;
+    if (!context.agendaUser) return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
+    const actorId = context.agendaUser.id;
     const taskId = Number((request.params as { id?: string }).id);
     const parsed = z.object({ status: z.enum(["IN_PROGRESS", "DONE"]) }).safeParse(request.body);
     if (!Number.isInteger(taskId) || !parsed.success) return reply.code(400).send({ message: "Status inválido." });
@@ -210,7 +296,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       await tx.activityLog.create({
         data: {
           taskId,
-          actorId: context.agendaUser.id,
+          actorId,
           action: "STATUS_CHANGED",
           summary: `alterou o status para “${statusName}” pelo aplicativo Gestão de Vendas`,
           metadata: { source: "gestao-vendas-mobile", authUserId: context.authUserId }
@@ -224,6 +310,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
   app.post("/api/mobile/agenda/tasks/:id/notes", async (request, reply) => {
     const context = await resolveMobileContext(request, reply);
     if (!context) return;
+    if (!context.agendaUser) return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
     const taskId = Number((request.params as { id?: string }).id);
     const parsed = z.object({ body: z.string().trim().min(1).max(5000) }).safeParse(request.body);
     if (!Number.isInteger(taskId) || !parsed.success) return reply.code(400).send({ message: "Informe uma descrição válida." });
@@ -247,6 +334,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
   app.post("/api/mobile/agenda/tasks/:id/photos", async (request, reply) => {
     const context = await resolveMobileContext(request, reply);
     if (!context) return;
+    if (!context.agendaUser) return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
     const taskId = Number((request.params as { id?: string }).id);
     if (!Number.isInteger(taskId)) return reply.code(400).send({ message: "Atividade inválida." });
     if (!await ownTask(context, taskId, reply)) return;
@@ -292,7 +380,19 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       where: { id: attachmentId },
       include: { task: { select: { id: true } } }
     });
-    if (!attachment || !await ownTask(context, attachment.task.id, reply)) return;
+    if (!attachment) return reply.code(404).send({ message: "Foto não encontrada." });
+    if (context.agendaUser) {
+      if (!await ownTask(context, attachment.task.id, reply)) return;
+    } else {
+      const visible = await prisma.task.count({
+        where: {
+          id: attachment.task.id,
+          deletedAt: null,
+          assignees: { some: { user: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] } } } }
+        }
+      });
+      if (!visible) return reply.code(404).send({ message: "Foto não encontrada em uma agenda disponível." });
+    }
     if (!attachment.mimeType.toLowerCase().startsWith("image/")) {
       return reply.code(415).send({ message: "Este anexo não é uma imagem." });
     }

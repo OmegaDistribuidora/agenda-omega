@@ -51,6 +51,7 @@ model User {
   passwordHash  String
   role          UserRole         @default(USER)
   active        Boolean          @default(true)
+  agendaRegion  String?
   teamLinks     TeamMember[]
   createdTasks  Task[]           @relation("TaskCreator")
   assignments   TaskAssignee[]
