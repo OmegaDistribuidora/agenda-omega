@@ -36,6 +36,19 @@ const mobileTaskInclude = {
   attachments: { orderBy: { createdAt: "desc" as const } }
 } as const;
 
+function mobileTaskResponse<T extends Record<string, unknown>>(task: T) {
+  const {
+    completionLocationShared: _shared,
+    completionLatitude: _latitude,
+    completionLongitude: _longitude,
+    completionAccuracyMeters: _accuracy,
+    completionAddress: _address,
+    completionLocationCapturedAt: _capturedAt,
+    ...safeTask
+  } = task;
+  return safeTask;
+}
+
 function bearerToken(request: FastifyRequest) {
   const authorization = request.headers.authorization || "";
   return authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
@@ -228,7 +241,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       user: selectedUser,
       owners: context.agendaUser ? [] : owners,
       period: { type: parsed.data.period, anchor, start: start.toISOString(), end: end.toISOString() },
-      tasks
+      tasks: tasks.map((task) => mobileTaskResponse(task))
     };
   });
 
@@ -268,7 +281,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       },
       include: mobileTaskInclude
     });
-    return reply.code(201).send(task);
+    return reply.code(201).send(mobileTaskResponse(task));
   });
 
   app.patch("/api/mobile/agenda/tasks/:id/status", async (request, reply) => {
@@ -277,7 +290,22 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     if (!context.agendaUser) return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
     const actorId = context.agendaUser.id;
     const taskId = Number((request.params as { id?: string }).id);
-    const parsed = z.object({ status: z.enum(["IN_PROGRESS", "DONE"]) }).safeParse(request.body);
+    const parsed = z.object({
+      status: z.enum(["IN_PROGRESS", "DONE"]),
+      location: z.object({
+        shared: z.boolean(),
+        latitude: z.number().gte(-90).lte(90).optional(),
+        longitude: z.number().gte(-180).lte(180).optional(),
+        accuracyMeters: z.number().nonnegative().max(100000).optional(),
+        address: z.string().trim().max(500).optional().nullable(),
+        capturedAt: z.string().datetime().optional()
+      }).optional()
+    }).superRefine((value, context) => {
+      if (value.status === "DONE" && value.location?.shared &&
+          (value.location.latitude === undefined || value.location.longitude === undefined)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Coordenadas da conclusÃ£o ausentes." });
+      }
+    }).safeParse(request.body);
     if (!Number.isInteger(taskId) || !parsed.success) return reply.code(400).send({ message: "Status inválido." });
     const task = await ownTask(context, taskId, reply);
     if (!task) return;
@@ -288,10 +316,24 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       return reply.code(409).send({ message: "Esta atividade não permite essa mudança de status pelo aplicativo." });
     }
     const statusName = parsed.data.status === "DONE" ? "Concluído" : "Em andamento";
+    const completionLocation = parsed.data.status === "DONE" ? parsed.data.location : undefined;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.task.update({
         where: { id: taskId },
-        data: { status: parsed.data.status, completedAt: parsed.data.status === "DONE" ? new Date() : null }
+        data: {
+          status: parsed.data.status,
+          completedAt: parsed.data.status === "DONE" ? new Date() : null,
+          ...(parsed.data.status === "DONE" ? {
+            completionLocationShared: completionLocation?.shared === true,
+            completionLatitude: completionLocation?.shared ? completionLocation.latitude : null,
+            completionLongitude: completionLocation?.shared ? completionLocation.longitude : null,
+            completionAccuracyMeters: completionLocation?.shared ? completionLocation.accuracyMeters ?? null : null,
+            completionAddress: completionLocation?.shared ? completionLocation.address || null : null,
+            completionLocationCapturedAt: completionLocation?.shared
+              ? new Date(completionLocation.capturedAt || Date.now())
+              : new Date()
+          } : {})
+        }
       });
       await tx.activityLog.create({
         data: {
@@ -299,12 +341,16 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
           actorId,
           action: "STATUS_CHANGED",
           summary: `alterou o status para “${statusName}” pelo aplicativo Gestão de Vendas`,
-          metadata: { source: "gestao-vendas-mobile", authUserId: context.authUserId }
+          metadata: {
+            source: "gestao-vendas-mobile",
+            authUserId: context.authUserId,
+            completionLocationShared: completionLocation?.shared === true
+          }
         }
       });
       return tx.task.findUnique({ where: { id: taskId }, include: mobileTaskInclude });
     });
-    return updated;
+    return updated ? mobileTaskResponse(updated) : updated;
   });
 
   app.post("/api/mobile/agenda/tasks/:id/notes", async (request, reply) => {

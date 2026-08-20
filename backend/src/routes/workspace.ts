@@ -19,6 +19,20 @@ const taskInclude = {
   activity: { include: { actor: { select: { id: true, displayName: true, avatarColor: true } } }, orderBy: { createdAt: "desc" as const } }
 } as const;
 
+function taskResponseFor<T extends Record<string, unknown>>(request: FastifyRequest, task: T) {
+  if (!isRestrictedAgendaRole(request.authUser?.role)) return task;
+  const {
+    completionLocationShared: _shared,
+    completionLatitude: _latitude,
+    completionLongitude: _longitude,
+    completionAccuracyMeters: _accuracy,
+    completionAddress: _address,
+    completionLocationCapturedAt: _capturedAt,
+    ...safeTask
+  } = task;
+  return safeTask;
+}
+
 async function allowedTeamIds(request: FastifyRequest) {
   if (isAdminRole(request.authUser!.role)) return (await prisma.team.findMany({ select: { id: true } })).map((t) => t.id);
   return (await prisma.teamMember.findMany({ where: { userId: request.authUser!.userId }, select: { teamId: true } })).map((t) => t.teamId);
@@ -57,11 +71,13 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       prisma.tag.findMany({ where: { teamId: { in: teamIds } }, orderBy: { name: "asc" } }),
       prisma.task.findMany({ where: { teamId: { in: teamIds }, deletedAt: null, ...(restricted ? { assignees: { some: { userId: request.authUser!.userId } } } : {}) }, include: taskInclude, orderBy: [{ position: "asc" }, { createdAt: "desc" }] })
     ]);
-    return { teams, users, folders, tags, tasks };
+    return { teams, users, folders, tags, tasks: tasks.map((task) => taskResponseFor(request, task)) };
   });
 
   app.get("/api/tasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {
-    const id = Number((request.params as any).id); return await getAccessibleTask(request, reply, id);
+    const id = Number((request.params as any).id);
+    const task = await getAccessibleTask(request, reply, id);
+    return task ? taskResponseFor(request, task) : task;
   });
 
   app.post("/api/tasks", { preHandler: [requireAuth] }, async (request, reply) => {
@@ -97,7 +113,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       tags: { create: (parsed.data.tagIds || []).map((tagId) => ({ tagId })) },
       activity: { create: { actorId: request.authUser!.userId, action: "CREATED", summary: "criou a atividade" } }
     }, include: taskInclude });
-    return reply.code(201).send(task);
+    return reply.code(201).send(taskResponseFor(request, task));
   });
 
   app.patch("/api/tasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {
@@ -121,10 +137,19 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     await prisma.$transaction(async (tx) => {
       if (assigneeIds !== undefined) { await tx.taskAssignee.deleteMany({ where: { taskId: id } }); if (assigneeIds.length) await tx.taskAssignee.createMany({ data: assigneeIds.map((userId) => ({ taskId: id, userId })), skipDuplicates: true }); }
       if (tagIds) { await tx.taskTag.deleteMany({ where: { taskId: id } }); if (tagIds.length) await tx.taskTag.createMany({ data: tagIds.map((tagId) => ({ taskId: id, tagId })), skipDuplicates: true }); }
-      await tx.task.update({ where: { id }, data: { ...scalar, ...(parsed.data.teamId && parsed.data.teamId !== existing.teamId && parsed.data.folderId === undefined ? { folderId: null } : {}), ...(dueAt !== undefined ? { dueAt: dueAt ? new Date(dueAt) : null } : {}), ...(statusChanged ? { completedAt: parsed.data.status === "DONE" ? new Date() : null } : {}) } });
+      await tx.task.update({ where: { id }, data: { ...scalar, ...(parsed.data.teamId && parsed.data.teamId !== existing.teamId && parsed.data.folderId === undefined ? { folderId: null } : {}), ...(dueAt !== undefined ? { dueAt: dueAt ? new Date(dueAt) : null } : {}), ...(statusChanged ? {
+        completedAt: parsed.data.status === "DONE" ? new Date() : null,
+        completionLocationShared: parsed.data.status === "DONE" ? false : null,
+        completionLatitude: null,
+        completionLongitude: null,
+        completionAccuracyMeters: null,
+        completionAddress: null,
+        completionLocationCapturedAt: parsed.data.status === "DONE" ? new Date() : null
+      } : {}) } });
       await tx.activityLog.create({ data: { taskId: id, actorId: request.authUser!.userId, action: statusChanged ? "STATUS_CHANGED" : assigneeIds !== undefined ? "ASSIGNEE_CHANGED" : "UPDATED", summary: statusChanged ? `alterou o status para “${statusNames[parsed.data.status!]}”` : assigneeIds !== undefined ? "alterou os responsáveis" : "atualizou a atividade", metadata: { changes: Object.keys(parsed.data) } } });
     });
-    return prisma.task.findUnique({ where: { id }, include: taskInclude });
+    const updated = await prisma.task.findUnique({ where: { id }, include: taskInclude });
+    return updated ? taskResponseFor(request, updated) : updated;
   });
 
   app.delete("/api/tasks/:id", { preHandler: [requireAuth] }, async (request, reply) => {

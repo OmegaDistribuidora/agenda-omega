@@ -109,6 +109,12 @@ model Task {
   priority    TaskPriority @default(MEDIUM)
   dueAt       DateTime?
   completedAt DateTime?
+  completionLocationShared     Boolean?
+  completionLatitude           Float?
+  completionLongitude          Float?
+  completionAccuracyMeters     Float?
+  completionAddress            String?
+  completionLocationCapturedAt DateTime?
   position    Float        @default(0)
   creatorId   Int
   teamId      Int
