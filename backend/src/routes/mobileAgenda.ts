@@ -6,13 +6,15 @@ import { z } from "zod";
 import { env } from "../config";
 import prisma from "../lib/prisma";
 import { agendaRegionForCoordinator, syncAgendaUserRegion } from "../lib/agendaAccess";
+import { canViewMobileAgendaOwner, mobileAgendaOwnerKey } from "../lib/mobileAgendaScope";
 
 type AppIdentity = {
   authUserId: string;
   code: string;
   displayName: string | null;
-  profileSlug: "supervisor" | "coordenador" | "diretoria" | "outros";
+  profileSlug: "supervisor" | "coordenador" | "diretoria" | "outros" | "gerencia";
   coordinatorCode: string | null;
+  visibleAgendaOwnerKeys: Set<string> | null;
 };
 
 type MobileContext = AppIdentity & {
@@ -24,7 +26,7 @@ type MobileContext = AppIdentity & {
   } | null;
 };
 
-const allowedAppProfiles = new Set(["supervisor", "coordenador", "diretoria", "outros"]);
+const allowedAppProfiles = new Set(["supervisor", "coordenador", "diretoria", "outros", "gerencia"]);
 const mobileTaskInclude = {
   team: { select: { id: true, name: true, color: true } },
   folder: { select: { id: true, name: true, color: true } },
@@ -54,12 +56,14 @@ function bearerToken(request: FastifyRequest) {
   return authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
 }
 
-async function supabaseRequest<T>(pathName: string, token: string): Promise<T> {
+async function supabaseRequest<T>(pathName: string, token: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${env.gestaoVendas.supabaseUrl}${pathName}`, {
+    ...init,
     headers: {
       apikey: env.gestaoVendas.supabasePublishableKey,
       Authorization: `Bearer ${token}`,
-      Accept: "application/json"
+      Accept: "application/json",
+      ...init.headers
     }
   });
   if (!response.ok) throw new Error(`Supabase respondeu ${response.status}`);
@@ -100,16 +104,32 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
       reply.code(403).send({ message: "A Agenda não está disponível para este perfil." });
       return null;
     }
-    if (!code && profileSlug !== "diretoria" && profileSlug !== "outros") {
+    if (!code && !["diretoria", "outros", "gerencia"].includes(profileSlug)) {
       reply.code(422).send({ message: "Seu usuário não possui código para integração com a Agenda." });
       return null;
+    }
+    let visibleAgendaOwnerKeys: Set<string> | null = null;
+    if (profileSlug === "gerencia") {
+      const visibleOwners = await supabaseRequest<Array<{
+        profile_slug?: string;
+        owner_code?: string;
+      }>>("/rest/v1/rpc/get_agenda_visible_owners", token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      visibleAgendaOwnerKeys = new Set(visibleOwners.map((owner) => {
+        const role = owner.profile_slug === "coordenador" ? "COORDINATOR" : "SUPERVISOR";
+        return mobileAgendaOwnerKey({ role, code: owner.owner_code || null });
+      }));
     }
     return {
       authUserId: authUser.id,
       code,
       displayName: row.display_name || null,
       profileSlug: profileSlug as AppIdentity["profileSlug"],
-      coordinatorCode: String(row.coordinator_code || "").trim() || null
+      coordinatorCode: String(row.coordinator_code || "").trim() || null,
+      visibleAgendaOwnerKeys
     };
   } catch (error) {
     request.log.warn({ error }, "Falha ao validar sessão do Gestão de Vendas");
@@ -127,7 +147,7 @@ function acceptedAgendaRoles(profileSlug: AppIdentity["profileSlug"]) {
 async function resolveMobileContext(request: FastifyRequest, reply: FastifyReply): Promise<MobileContext | null> {
   const identity = await resolveAppIdentity(request, reply);
   if (!identity) return null;
-  if (identity.profileSlug === "diretoria" || identity.profileSlug === "outros") {
+  if (["diretoria", "outros", "gerencia"].includes(identity.profileSlug)) {
     return { ...identity, agendaUser: null };
   }
   const users = await prisma.user.findMany({
@@ -204,11 +224,18 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ message: "Período inválido." });
     const anchor = parsed.data.anchor || new Date().toISOString().slice(0, 10);
     const { start, end } = saoPauloPeriodBounds(parsed.data.period, anchor);
-    const owners = await prisma.user.findMany({
+    let owners = await prisma.user.findMany({
       where: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] }, code: { not: null } },
       select: { id: true, displayName: true, code: true, role: true },
       orderBy: [{ role: "asc" }, { displayName: "asc" }, { code: "asc" }]
     }) as Array<NonNullable<MobileContext["agendaUser"]>>;
+    if (context.profileSlug === "gerencia") {
+      owners = owners.filter((owner) => canViewMobileAgendaOwner(
+        context.profileSlug,
+        context.visibleAgendaOwnerKeys,
+        { ...owner, active: true }
+      ));
+    }
     let selectedUser = context.agendaUser;
     if (!selectedUser) {
       if (parsed.data.ownerCode || parsed.data.ownerRole) {
@@ -430,13 +457,24 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     if (context.agendaUser) {
       if (!await ownTask(context, attachment.task.id, reply)) return;
     } else {
-      const visible = await prisma.task.count({
+      const visibleTask = await prisma.task.findFirst({
         where: {
           id: attachment.task.id,
-          deletedAt: null,
-          assignees: { some: { user: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] } } } }
+          deletedAt: null
+        },
+        select: {
+          assignees: {
+            select: {
+              user: { select: { active: true, role: true, code: true } }
+            }
+          }
         }
       });
+      const visible = visibleTask?.assignees.some(({ user }) => canViewMobileAgendaOwner(
+        context.profileSlug,
+        context.visibleAgendaOwnerKeys,
+        user
+      ));
       if (!visible) return reply.code(404).send({ message: "Foto não encontrada em uma agenda disponível." });
     }
     if (!attachment.mimeType.toLowerCase().startsWith("image/")) {

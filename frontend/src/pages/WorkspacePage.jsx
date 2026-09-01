@@ -9,6 +9,7 @@ import TaskModal from "../components/TaskModal";
 import AdminModal from "../components/AdminModal";
 import UserAnalytics from "../components/UserAnalytics";
 import { matchesTaskScope, nextStatus, resolveTeamContext } from "../lib/taskUtils";
+import { todayDueAtIso } from "../lib/taskDates";
 
 const statusNames={TODO:"A fazer",IN_PROGRESS:"Em andamento",DONE:"Concluído"};
 const statusOrder=["TODO","IN_PROGRESS","DONE"];
@@ -41,7 +42,7 @@ export default function WorkspacePage(){
   const expandedTeamId=scope.startsWith("team:")?Number(scope.split(":")[1]):selectedFolder?.teamId||null;
   const counts={pending:visible.filter(t=>t.status!=="DONE").length,done:visible.filter(t=>t.status==="DONE").length};
   function movePeriod(direction){setAnchor(value=>{const next=new Date(value);if(period==="week")next.setDate(next.getDate()+direction*7);else next.setMonth(next.getMonth()+direction);return next;});}
-  async function addQuick(e){e.preventDefault();if(!quick.trim()||quickBusy)return; if(!restricted&&!activeTeamId){notify("Selecione uma equipe antes de criar a atividade.","error");return;} setQuickBusy(true);try{const payload=restricted?{title:quick}:{title:quick,teamId:activeTeamId,folderId:selectedFolder?.id||null};const task=await apiJson("/tasks",{token,method:"POST",data:payload});setData(current=>({...current,tasks:[...current.tasks,task]}));setQuick("");notify("Atividade criada");}catch(err){notify(err.message,"error");}finally{setQuickBusy(false);}}
+  async function addQuick(e){e.preventDefault();if(!quick.trim()||quickBusy)return; if(!restricted&&!activeTeamId){notify("Selecione uma equipe antes de criar a atividade.","error");return;} setQuickBusy(true);try{const payload=restricted?{title:quick,dueAt:todayDueAtIso()}:{title:quick,teamId:activeTeamId,folderId:selectedFolder?.id||null,dueAt:todayDueAtIso()};const task=await apiJson("/tasks",{token,method:"POST",data:payload});setData(current=>({...current,tasks:[...current.tasks,task]}));setQuick("");notify("Atividade criada");}catch(err){notify(err.message,"error");}finally{setQuickBusy(false);}}
   async function addFolder(name){if(!activeTeamId)return;try{const folder=await apiJson("/folders",{token,method:"POST",data:{name,color:"#d9a441",teamId:activeTeamId}});setData(current=>({...current,folders:[...current.folders,folder]}));setFolderForm(false);notify("Pasta criada");}catch(e){notify(e.message,"error");}}
   async function deleteFolder(folder,event){event.stopPropagation();if(!confirm(`Excluir a pasta “${folder.name}”? As atividades continuarão disponíveis na equipe.`))return;try{await apiJson(`/folders/${folder.id}`,{token,method:"DELETE"});setData(current=>({...current,folders:current.folders.filter(item=>item.id!==folder.id),tasks:current.tasks.map(task=>task.folderId===folder.id?{...task,folderId:null,folder:null}:task)}));if(scope===`folder:${folder.id}`)setScope(`team:${folder.teamId}`);notify("Pasta excluída");}catch(e){notify(e.message,"error");}}
   function startNew(initial={}){setSelected({isNew:true,...initial,teamId:initial.teamId||activeTeamId||undefined,folderId:initial.folderId||(selectedFolder?.id||undefined)});}
