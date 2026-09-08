@@ -25,6 +25,29 @@ test("gerencia enxerga somente os responsaveis liberados pelo Supabase", () => {
   }), false);
 });
 
+test("coordenador enxerga a propria agenda e somente seus supervisores", () => {
+  const coordinatorKeys = new Set([
+    "COORDINATOR|12",
+    "SUPERVISOR|33",
+    "SUPERVISOR|29"
+  ]);
+  assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
+    active: true,
+    role: "COORDINATOR",
+    code: "12"
+  }), true);
+  assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
+    active: true,
+    role: "SUPERVISOR",
+    code: "33"
+  }), true);
+  assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
+    active: true,
+    role: "SUPERVISOR",
+    code: "20"
+  }), false);
+});
+
 test("diretoria e outros continuam visualizando toda a agenda comercial", () => {
   for (const profileSlug of ["diretoria", "outros"]) {
     assert.equal(canViewMobileAgendaOwner(profileSlug, null, {

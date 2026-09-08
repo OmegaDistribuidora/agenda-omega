@@ -18,6 +18,6 @@ export function canViewMobileAgendaOwner(
   if (owner.active === false || !agendaOwnerRoles.has(owner.role) || !String(owner.code || "").trim()) {
     return false;
   }
-  if (viewerProfileSlug !== "gerencia") return true;
+  if (!["gerencia", "coordenador"].includes(viewerProfileSlug)) return true;
   return visibleOwnerKeys?.has(mobileAgendaOwnerKey(owner)) === true;
 }
