@@ -122,18 +122,6 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
         const role = owner.profile_slug === "coordenador" ? "COORDINATOR" : "SUPERVISOR";
         return mobileAgendaOwnerKey({ role, code: owner.owner_code || null });
       }));
-    } else if (profileSlug === "coordenador") {
-      const visibleSupervisors = await supabaseRequest<Array<{
-        owner_code?: string;
-      }>>("/rest/v1/rpc/app_view_scope_options", token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allowed_target_profiles: ["supervisor"] })
-      });
-      visibleAgendaOwnerKeys = new Set(visibleSupervisors.map((owner) =>
-        mobileAgendaOwnerKey({ role: "SUPERVISOR", code: owner.owner_code || null })
-      ));
-      visibleAgendaOwnerKeys.add(mobileAgendaOwnerKey({ role: "COORDINATOR", code }));
     }
     return {
       authUserId: authUser.id,
@@ -236,28 +224,22 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ message: "Período inválido." });
     const anchor = parsed.data.anchor || new Date().toISOString().slice(0, 10);
     const { start, end } = saoPauloPeriodBounds(parsed.data.period, anchor);
-    let owners = await prisma.user.findMany({
-      where: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] }, code: { not: null } },
-      select: { id: true, displayName: true, code: true, role: true },
-      orderBy: [{ role: "asc" }, { displayName: "asc" }, { code: "asc" }]
-    }) as Array<NonNullable<MobileContext["agendaUser"]>>;
-    if (["gerencia", "coordenador"].includes(context.profileSlug)) {
+    const canSelectOwner = ["diretoria", "outros", "gerencia"]
+      .includes(context.profileSlug);
+    let owners = canSelectOwner
+      ? await prisma.user.findMany({
+          where: { active: true, role: { in: ["SUPERVISOR", "COORDINATOR"] }, code: { not: null } },
+          select: { id: true, displayName: true, code: true, role: true },
+          orderBy: [{ role: "asc" }, { displayName: "asc" }, { code: "asc" }]
+        }) as Array<NonNullable<MobileContext["agendaUser"]>>
+      : context.agendaUser ? [context.agendaUser] : [];
+    if (context.profileSlug === "gerencia") {
       owners = owners.filter((owner) => canViewMobileAgendaOwner(
         context.profileSlug,
         context.visibleAgendaOwnerKeys,
         { ...owner, active: true }
       ));
     }
-    if (context.profileSlug === "coordenador" && context.agendaUser) {
-      const ownAgendaUserId = context.agendaUser.id;
-      owners.sort((left, right) => {
-        if (left.id === ownAgendaUserId) return -1;
-        if (right.id === ownAgendaUserId) return 1;
-        return left.displayName.localeCompare(right.displayName, "pt-BR");
-      });
-    }
-    const canSelectOwner = ["diretoria", "outros", "gerencia", "coordenador"]
-      .includes(context.profileSlug);
     let selectedUser = context.agendaUser;
     if (canSelectOwner && (parsed.data.ownerCode || parsed.data.ownerRole)) {
       selectedUser = owners.find((owner) =>
@@ -332,6 +314,51 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       include: mobileTaskInclude
     });
     return reply.code(201).send(mobileTaskResponse(task));
+  });
+
+  app.patch("/api/mobile/agenda/tasks/:id", async (request, reply) => {
+    const context = await resolveMobileContext(request, reply);
+    if (!context) return;
+    if (!context.agendaUser) {
+      return reply.code(403).send({ message: "Este perfil possui acesso somente para consulta da Agenda." });
+    }
+    const taskId = Number((request.params as { id?: string }).id);
+    const parsed = z.object({
+      title: z.string().trim().min(1).max(180),
+      description: z.string().trim().max(10000).optional().nullable(),
+      dueAt: z.string().datetime().optional().nullable(),
+      priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"])
+    }).safeParse(request.body);
+    if (!Number.isInteger(taskId) || !parsed.success) {
+      return reply.code(400).send({ message: parsed.success ? "Atividade inválida." : parsed.error.issues[0]?.message || "Dados inválidos." });
+    }
+    if (!await ownTask(context, taskId, reply)) return;
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.task.update({
+        where: { id: taskId },
+        data: {
+          title: parsed.data.title,
+          description: parsed.data.description || null,
+          dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
+          priority: parsed.data.priority
+        }
+      });
+      await tx.activityLog.create({
+        data: {
+          taskId,
+          actorId: context.agendaUser!.id,
+          action: "UPDATED",
+          summary: "atualizou a atividade pelo aplicativo Gestão de Vendas",
+          metadata: {
+            source: "gestao-vendas-mobile",
+            authUserId: context.authUserId,
+            changes: ["title", "description", "dueAt", "priority"]
+          }
+        }
+      });
+      return tx.task.findUnique({ where: { id: taskId }, include: mobileTaskInclude });
+    });
+    return updated ? mobileTaskResponse(updated) : updated;
   });
 
   app.patch("/api/mobile/agenda/tasks/:id/status", async (request, reply) => {
@@ -477,7 +504,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       include: { task: { select: { id: true } } }
     });
     if (!attachment) return reply.code(404).send({ message: "Foto não encontrada." });
-    if (context.agendaUser && context.profileSlug !== "coordenador") {
+    if (context.agendaUser) {
       if (!await ownTask(context, attachment.task.id, reply)) return;
     } else {
       const visibleTask = await prisma.task.findFirst({
