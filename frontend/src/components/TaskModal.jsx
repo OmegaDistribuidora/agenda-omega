@@ -17,7 +17,6 @@ export default function TaskModal({task,data,token,user,onClose,onChanged,notify
   const isNew=task.isNew; const baseTeam=isNew?(task.teamId||(data.teams.length===1?data.teams[0].id:null)):task.teamId; const [form,setForm]=useState({title:isNew?"":task.title,description:isNew?"":task.description||"",teamId:baseTeam||"",folderId:isNew?(task.folderId||""):task.folderId||"",status:isNew?(task.status||"TODO"):task.status,priority:isNew?"MEDIUM":task.priority,dueAt:isNew?(inputDate(task.dueAt)||todayInputDate()):inputDate(task.dueAt),assigneeIds:isNew?[user.id]:task.assignees.map(a=>a.user.id),tagIds:isNew?[]:task.tags.map(t=>t.tag.id)}); const [tab,setTab]=useState("details"); const [busy,setBusy]=useState(false); const [uploading,setUploading]=useState(false); const [subtask,setSubtask]=useState(""); const [comment,setComment]=useState(""); const fileRef=useRef(); const uploadLockRef=useRef(false);
   const [pendingFiles,setPendingFiles]=useState([]);
   const pasteHandlerRef=useRef();
-  const clipboardReaderRef=useRef();
   const current=isNew?null:data.tasks.find(t=>t.id===task.id)||task; const teamUsers=useMemo(()=>responsibleOptions(data.teams.find(t=>t.id===Number(form.teamId))?.members.map(m=>m.user)||[],data.users,user,form.assigneeIds),[data.teams,data.users,user,form.teamId,form.assigneeIds]); const teamTags=data.tags.filter(t=>t.teamId===Number(form.teamId)); const folders=data.folders.filter(f=>!f.teamId||f.teamId===Number(form.teamId));
   const canViewCompletionLocation=user.role==="ADMIN"||user.role==="USER";
   async function refresh(){if(isNew)return;const result=await apiJson(`/tasks/${task.id}`,{token});onChanged(result);}
@@ -54,21 +53,11 @@ export default function TaskModal({task,data,token,user,onClose,onChanged,notify
   async function handlePaste(event){if(uploadLockRef.current)return;const images=clipboardImageFiles(event.clipboardData);if(images.length){event.preventDefault();await uploadPastedImages(images);return;}const clipboardText=event.clipboardData?.getData?.("text")||"";if(!clipboardText)await readClipboardImages();}
   async function handleDrop(event){event.preventDefault();if(uploading)return;const file=event.dataTransfer?.files?.[0];await uploadFile(file);}
   pasteHandlerRef.current=handlePaste;
-  clipboardReaderRef.current=readClipboardImages;
   useEffect(()=>{
-    let pasteSequence=0;
-    let fallbackTimer;
-    const listener=event=>{pasteSequence++;clearTimeout(fallbackTimer);void pasteHandlerRef.current(event);};
-    // Alguns navegadores não emitem paste quando o foco está em um botão.
-    // A leitura direta só entra se o evento nativo não chegou; texto segue normal.
-    const keydown=event=>{
-      if(!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=="v"||event.repeat)return;
-      const sequence=pasteSequence;
-      clearTimeout(fallbackTimer);
-      fallbackTimer=setTimeout(()=>{if(sequence===pasteSequence)void clipboardReaderRef.current({silent:true});},150);
-    };
-    document.addEventListener("paste",listener,true);document.addEventListener("keydown",keydown,true);
-    return()=>{clearTimeout(fallbackTimer);document.removeEventListener("paste",listener,true);document.removeEventListener("keydown",keydown,true);};
+    // Um único evento evita duplicar o print quando o clipboard demora a responder.
+    const listener=event=>{void pasteHandlerRef.current(event);};
+    document.addEventListener("paste",listener,true);
+    return()=>document.removeEventListener("paste",listener,true);
   },[]);
   const completed=current?.subtasks.filter(s=>s.completed).length||0; const progress=current?.subtasks.length?Math.round(completed/current.subtasks.length*100):0;
   return <Modal onClose={onClose} className="task-modal"><header className="modal-header"><div className="task-breadcrumb"><span style={{"--crumb":data.teams.find(t=>t.id===Number(form.teamId))?.color}}/>{data.teams.find(t=>t.id===Number(form.teamId))?.name||"Nova atividade"}<span>/</span>{isNew?"Criar":"AG-"+task.id}</div><div><button title="Copiar link" onClick={()=>{navigator.clipboard?.writeText(location.href+`?task=${task.id}`);notify("Link copiado")}}><Link2/></button>{!isNew&&!restricted&&<button title="Excluir" onClick={remove}><Trash2/></button>}<button onClick={onClose}><X/></button></div></header>

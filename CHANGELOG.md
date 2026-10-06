@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1 — 2026-10-06
+
+- substitui os avatares com iniciais pelos nomes completos dos responsáveis na lista e no Kanban;
+- exibe todos os responsáveis, com quebra de linha em telas menores.
+- evita envio duplicado de prints quando o evento de colagem demora a chegar.
+
 ## 1.4.0 — 2026-10-06
 
 - filtra conclusões pela data de conclusão e mantém todas as atividades abertas visíveis no web;

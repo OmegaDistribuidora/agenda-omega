@@ -87,3 +87,8 @@
 .clipboard-target{border:1px dashed #bbb8ad;border-radius:9px;min-height:48px;padding:14px;margin-bottom:12px;font-size:13px;color:#68717d;outline:none}.clipboard-target:empty:before{content:attr(data-placeholder)}.clipboard-target:focus{border-color:var(--green);box-shadow:0 0 0 3px #3f7f751a}.pending-attachments>div{display:flex;align-items:center;gap:8px;padding:12px;font-size:12px}.pending-attachments svg{width:16px}.pending-attachments span{flex:1}.pending-attachments button{background:none;border:0}
 @media(max-width:1000px){.team-member-grid{grid-template-columns:1fr}.toolbar{flex-wrap:wrap}.view-switch{flex-wrap:wrap}}
 @media(max-width:650px){.team-analysis-summary{flex-wrap:wrap;gap:20px;padding:20px}.team-analysis-summary>div:first-child{flex-basis:100%}.team-deliveries{padding:0 14px}}
+/* Nomes dos responsáveis nas atividades */
+.assignee-names{display:flex;flex-direction:column;gap:5px;min-width:0;text-align:right;font-size:12px;font-weight:500;line-height:1.45;color:var(--ink-2)}.assignee-names>span{overflow-wrap:anywhere}.assignee-names .unassigned{font-weight:400;color:var(--muted)}
+.task-row{grid-template-columns:34px minmax(180px,1fr) minmax(0,auto) minmax(130px,210px) 16px 14px}
+.kanban-card footer{gap:12px;align-items:flex-start}.kanban-card footer>.assignee-names{flex:1;font-size:11px}.kanban-card footer>span{flex-shrink:0}
+@media(max-width:900px){.task-row{grid-template-columns:28px minmax(0,1fr) minmax(90px,35%);gap:10px}.task-row .assignee-names{font-size:11px}}
