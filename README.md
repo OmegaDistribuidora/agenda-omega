@@ -11,9 +11,10 @@ Agenda colaborativa interna da Omega. Reúne atividades pessoais e das equipes e
 - estados **A fazer**, **Em andamento** e **Concluído**, inclusive por botão rápido ou drag-and-drop;
 - prioridades **Baixa**, **Média**, **Alta** e **Urgente**;
 - lista pessoal, listas por equipe, pastas compartilhadas dentro de cada equipe e busca;
-- visões semana e mês;
+- visões semana e mês filtram somente as concluídas pela data de conclusão; todas as tarefas abertas permanecem visíveis, com prazo vencido, futuro ou sem prazo;
 - Kanban com cartões, progresso do checklist, responsáveis e prazo;
 - análise por usuário dentro de cada equipe, com indicadores por período, distribuição por status, ritmo detalhado de conclusões e radares de pendências e entregas;
+- análise da equipe com cards expansíveis por membro, entregas, prévias de anexos e localização; a lista Por usuário mostra apenas quem concluiu pelo menos uma tarefa no período;
 - descrição, subtarefas, timeline e anexos de até 10 MB;
 - exclusão lógica, preservando o evento no histórico do banco;
 - administração para criar, editar e excluir equipes e usuários;
@@ -28,7 +29,7 @@ Agenda colaborativa interna da Omega. Reúne atividades pessoais e das equipes e
 
 ## Executar localmente
 
-Requisitos: Node.js 20+ e PostgreSQL 16+. Se houver Docker, o banco de desenvolvimento pode ser iniciado com:
+Requisitos: Node.js 22 e PostgreSQL 16+. Se houver Docker, o banco de desenvolvimento pode ser iniciado com:
 
 ```bash
 docker compose up -d postgres
@@ -161,18 +162,42 @@ npm run seed             # garante dados iniciais fora de produção
 
 ## Segurança e armazenamento
 
-- Todas as rotas de tarefa verificam sessão e participação na equipe.
+- As rotas web verificam sessão e participação na equipe (administradores acessam todas). Supervisor e Coordenador também precisam estar atribuídos à atividade.
+- Cada requisição autenticada web verifica no banco se a conta existe, está ativa e conserva perfil, login e versão da sessão. Alterar perfil, ativação ou login incrementa `sessionVersion`, invalidando tokens anteriores inclusive após reativação. A interface verifica a sessão ao recuperar o foco e a cada 30 segundos; a API bloqueia na próxima requisição.
 - Downloads de anexos também passam pela autorização; o diretório não é servido publicamente.
 - Nomes físicos dos arquivos são UUIDs e o limite por upload é 10 MB.
 - Exclusões de tarefa são lógicas e registradas na timeline.
-- A estrutura de comentários permanece no banco e na API para uso futuro, mas está oculta na interface por uma feature flag.
+- A aba Conversa está ativa e exibe também as observações enviadas pelo aplicativo.
 - Excluir uma pasta preserva suas tarefas na raiz da equipe; excluir uma equipe remove definitivamente todo o conteúdo pertencente a ela.
 - Credenciais e arquivos enviados ficam fora do Git.
 
 ## Integração móvel com o Gestão de Vendas
 
-As rotas em `/api/mobile/agenda` validam a sessão Supabase do Gestão de Vendas,
-relacionam o usuário pelo código e aceitam somente os perfis Supervisor e
-Coordenador cadastrados na Agenda. O aplicativo pode listar apenas atividades
-atribuídas ao próprio usuário, avançar o status, adicionar observações e enviar
-fotos. Criação, edição administrativa e exclusão continuam restritas ao painel web.
+As rotas em `/api/mobile/agenda` validam a sessão Supabase e o perfil ativo do Gestão de Vendas a cada requisição.
+
+- Supervisor/Coordenador: vínculo por código e perfil com uma única conta ativa na Agenda; consulta, criação e edição das próprias atribuições, avanço de status, observações e fotos. Não podem excluir ou reatribuir tarefas. Coordenadores consultam somente a própria agenda.
+- Diretoria/Outros: consulta de agendas comerciais, sem edição.
+- Gerência: consulta limitada aos responsáveis retornados por `get_agenda_visible_owners` no Supabase.
+- Criação regional: equipe `Comercial Externo` e pastas `Capital` (coordenador 12), `Cariri` (13) e `Interior` (10). No aplicativo, o supervisor usa o código de seu coordenador. No web, a região é resolvida pelo cadastro sincronizado, código ou atribuições anteriores.
+- O aplicativo pode registrar localização opcional na conclusão. As respostas móveis e o web de Supervisor/Coordenador omitem as coordenadas. Administrador/Colaborador podem consultá-las no web, respeitando o acesso à tarefa.
+- O filtro móvel permanece por prazo, incluindo tarefas sem prazo. A nova regra por data de conclusão aplica-se às visualizações web.
+
+## Períodos e indicadores no web
+
+Lista, Kanban e análise individual incluem todas as tarefas abertas e somente as concluídas com `completedAt` dentro do intervalo selecionado (início inclusivo, fim exclusivo). Tarefas concluídas sem prazo também seguem a data de conclusão. Uma tarefa com prazo em setembro e concluída em outubro aparece nas entregas de outubro.
+
+A taxa de conclusão é `concluídas no período / (todas as abertas + concluídas no período)`. Ela descreve a carteira atual, não uma fotografia histórica das atribuições. A análise da equipe conta tarefas distintas no total; tarefas compartilhadas aparecem no card de cada responsável. Responsáveis de entregas que já não integram a equipe continuam representados; tarefas sem responsável têm um grupo próprio.
+
+Criar diretamente como Concluída registra `completedAt`. Reabrir limpa essa data e a localização; concluir novamente registra uma nova conclusão. Registros antigos sem `completedAt` não recebem data presumida nem entram nos indicadores de entregas.
+
+## Imagens e anexos
+
+Na janela da atividade, Ctrl+V, a área de colagem e o botão Colar print aceitam imagens do clipboard. Antes de criar a atividade, os arquivos ficam pendentes e são enviados ao salvar. Uploads que falharem permanecem disponíveis para nova tentativa. O limite é 10 MB por arquivo.
+
+Imagens têm prévia e abrem em outra aba ao clicar; o botão direito permite salvar. Demais arquivos continuam com download. Lista e Kanban sinalizam anexos com clipe e localização compartilhada com mapa. O navegador precisa permitir leitura do clipboard para o botão Colar print; o evento nativo Ctrl+V usa os dados fornecidos pelo próprio navegador.
+
+## Validação e atualização
+
+`npm test` executa testes unitários e de rotas com banco simulado. `npm run build` gera o Prisma Client, compila o backend e o frontend. `npm run test:e2e --workspace frontend` executa testes de navegador com Chrome instalado, API simulada e servidor isolado na porta 5178, incluindo clipboard real. Não usa o banco de produção.
+
+Esta versão adiciona `User.sessionVersion` com valor inicial zero. O comando de inicialização existente (`prisma db push --skip-generate`) aplica a coluna no deploy; tokens anteriores são tratados como versão zero e continuam válidos somente enquanto a conta e o perfil coincidirem. Não é necessário adicionar variáveis de ambiente.

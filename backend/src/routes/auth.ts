@@ -11,7 +11,7 @@ function serializeUser(user: any) {
   return { id: user.id, username: user.username, displayName: user.displayName, code: user.code, email: user.email, avatarColor: user.avatarColor, role: user.role, active: user.active, teams: (user.teamLinks || []).map((link: any) => ({ ...link.team, memberRole: link.role })) };
 }
 async function issue(user: any) {
-  return { token: signToken({ userId: user.id, username: user.username, role: user.role }), user: serializeUser(user) };
+  return { token: signToken({ userId: user.id, username: user.username, role: user.role, sessionVersion: user.sessionVersion }), user: serializeUser(user) };
 }
 async function blockAdmin(reply: FastifyReply, payload: any, target: string) {
   const source = String(payload.ecosystemUsername || "").toLowerCase();

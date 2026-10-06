@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.0 — 2026-10-06
+
+- filtra conclusões pela data de conclusão e mantém todas as atividades abertas visíveis no web;
+- registra a data ao criar uma tarefa já concluída;
+- adiciona análise da equipe com entregas por pessoa, anexos e localização;
+- limita a seleção Por usuário a responsáveis com conclusões no período;
+- corrige conflito entre ícone File e arquivo nativo do navegador que impedia colar prints;
+- permite preparar anexos antes da criação e abrir imagens em outra aba;
+- adiciona indicadores de anexos e localização na lista e no Kanban;
+- revoga sessões após mudança de perfil, login ou ativação, com validação a cada requisição;
+- atualiza documentação e inclui testes de rotas e navegador.
+
+### Evoluções anteriores incorporadas desde 1.3.1
+
+- integração com Gestão de Vendas por sessão Supabase, código e perfil;
+- criação regional em Comercial Externo, restrições de Supervisor/Coordenador e consulta de Gerência;
+- observações, fotos e localização da conclusão no aplicativo;
+- prazo inicial de hoje no web e edição de tarefas no aplicativo.
+
 ## 1.3.1 — 2026-08-19
 
 ### Correções

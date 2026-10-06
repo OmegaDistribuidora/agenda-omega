@@ -109,6 +109,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       title: parsed.data.title, description: parsed.data.description || null, teamId, folderId,
       status: parsed.data.status || "TODO", priority: parsed.data.priority || "MEDIUM", dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
       position: (max._max.position || 0) + 1, creatorId: request.authUser!.userId,
+      completedAt: parsed.data.status === "DONE" ? new Date() : null,
       assignees: { create: (restricted ? [request.authUser!.userId] : resolveInitialAssigneeIds(parsed.data.assigneeIds, request.authUser!.userId)).map((userId) => ({ userId })) },
       tags: { create: (parsed.data.tagIds || []).map((tagId) => ({ tagId })) },
       activity: { create: { actorId: request.authUser!.userId, action: "CREATED", summary: "criou a atividade" } }
@@ -259,7 +260,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (validTeams !== parsed.data.teamIds.length) return reply.code(400).send({ message: "Uma das equipes selecionadas não existe." });
     try {
       const updated = await prisma.$transaction(async (tx) => {
-        await tx.user.update({ where: { id }, data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, code: parsed.data.code || null, email: parsed.data.email, role: parsed.data.role, active: parsed.data.active } });
+        const current = await tx.user.findUniqueOrThrow({ where: { id } });
+        const accessChanged = current.role !== parsed.data.role || current.active !== parsed.data.active || current.username !== parsed.data.username.toLowerCase();
+        await tx.user.update({ where: { id }, data: { username: parsed.data.username.toLowerCase(), displayName: parsed.data.displayName, code: parsed.data.code || null, email: parsed.data.email, role: parsed.data.role, active: parsed.data.active, ...(accessChanged ? { sessionVersion: { increment: 1 } } : {}) } });
         await tx.teamMember.deleteMany({ where: { userId: id } });
         await tx.teamMember.createMany({ data: parsed.data.teamIds.map((teamId) => ({ userId: id, teamId })) });
         return tx.user.findUnique({ where: { id }, include: { teamLinks: { include: { team: true } } } });

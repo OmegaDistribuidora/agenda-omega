@@ -26,9 +26,22 @@ export function matchesTaskScope(task, scope, userId) {
 }
 
 export function isTaskInPeriod(task, start, end) {
-  if (!task.dueAt) return true;
-  const dueAt = new Date(task.dueAt);
-  return dueAt >= start && dueAt < end;
+  return task.status !== "DONE" || isCompletedInPeriod(task, start, end);
+}
+
+export function isCompletedInPeriod(task, start, end) {
+  if (task.status !== "DONE" || !task.completedAt) return false;
+  const completedAt = new Date(task.completedAt);
+  return completedAt >= start && completedAt < end;
+}
+
+export function teamCompletionGroups(team, tasks, start, end) {
+  const completed = tasks.filter(task => task.teamId === team.id && isCompletedInPeriod(task, start, end));
+  const people = new Map((team.members || []).map(({ user }) => [user.id, user]));
+  // Preservar também entregas de responsáveis que já não fazem parte da equipe.
+  completed.forEach(task => task.assignees.forEach(({ user }) => { if (!people.has(user.id)) people.set(user.id, user); }));
+  return [...people.values()].map(user => ({ user, tasks: completed.filter(task => task.assignees.some(a => a.user.id === user.id)).sort((a,b) => new Date(b.completedAt) - new Date(a.completedAt)) }))
+    .sort((a,b) => b.tasks.length - a.tasks.length || a.user.displayName.localeCompare(b.user.displayName, "pt-BR"));
 }
 
 export function tasksForUserPeriod(tasks, teamId, userId, start, end) {
@@ -38,6 +51,7 @@ export function tasksForUserPeriod(tasks, teamId, userId, start, end) {
 }
 
 export function buildUserAnalytics(tasks, start, end, now = new Date()) {
+  tasks = tasks.filter(task => isTaskInPeriod(task, start, end));
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const todo = tasks.filter((task) => task.status === "TODO").length;

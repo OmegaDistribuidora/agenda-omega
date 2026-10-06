@@ -1,5 +1,5 @@
 import { CalendarOff, CheckCircle2, CircleDashed, Clock3, Gauge, TriangleAlert, UserRound } from "lucide-react";
-import { buildUserAnalytics, completionBuckets, tasksForUserPeriod } from "../lib/taskUtils";
+import { buildUserAnalytics, completionBuckets, tasksForUserPeriod, teamCompletionGroups } from "../lib/taskUtils";
 import { Avatar, EmptyState, PriorityPip } from "./ui";
 
 const ROLE_LABELS = { USER: "Colaborador", SUPERVISOR: "Supervisor", COORDINATOR: "Coordenador", ADMIN: "Administrador" };
@@ -27,9 +27,9 @@ function attentionScore(task) {
 }
 
 export default function UserAnalytics({ team, tasks, start, end, period, selectedUserId, onSelectUser, onOpenTask }) {
-  const members = (team?.members || []).map((member) => member.user).sort((a, b) => a.displayName.localeCompare(b.displayName, "pt-BR"));
+  const members = team ? teamCompletionGroups(team, tasks, start, end).filter(group => group.tasks.length > 0).map(group => group.user) : [];
   const selectedUser = members.find((person) => person.id === selectedUserId) || members[0];
-  if (!selectedUser) return <EmptyState icon={<UserRound />} title="Equipe sem usuários" text="Adicione colaboradores à equipe para visualizar a análise individual." />;
+  if (!selectedUser) return <EmptyState icon={<UserRound />} title="Nenhuma conclusão neste período" text="A análise por usuário lista quem concluiu pelo menos uma atividade da equipe na semana ou mês selecionado." />;
 
   const userTasks = tasksForUserPeriod(tasks, team.id, selectedUser.id, start, end);
   const summary = buildUserAnalytics(userTasks, start, end);
@@ -45,7 +45,7 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
   const doneRate = percent(summary.done, summary.total);
   const progressRate = percent(summary.inProgress, summary.total);
   const cards = [
-    { label: "Total no período", value: summary.total, note: `${summary.withoutDueDate} sem prazo`, tone: "ink", icon: <Gauge /> },
+    { label: "Carteira considerada", value: summary.total, note: "Abertas + conclusões do período", tone: "ink", icon: <Gauge /> },
     { label: "A fazer", value: summary.todo, note: `${percent(summary.todo, summary.total)}% da carteira`, tone: "todo", icon: <CircleDashed /> },
     { label: "Em andamento", value: summary.inProgress, note: `${percent(summary.inProgress, summary.total)}% da carteira`, tone: "progress", icon: <Clock3 /> },
     { label: "Concluídas", value: summary.done, note: `${summary.completedInPeriod} concluídas neste intervalo`, tone: "done", icon: <CheckCircle2 /> },
@@ -78,7 +78,7 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
 
       <section className="analytics-panel indicator-panel">
         <header><div><span className="panel-kicker">Qualidade da carteira</span><h3>Indicadores</h3></div></header>
-        <MetricBar label="Taxa de conclusão" detail="Concluídas sobre o total" value={summary.completionRate} tone="green" />
+        <MetricBar label="Taxa de conclusão" detail="Conclusões do período / (abertas + conclusões)" value={summary.completionRate} tone="green" />
         <MetricBar label="Prazo cumprido" detail="Concluídas até o vencimento" value={summary.onTimeRate} tone="blue" />
         <MetricBar label="Sem prazo definido" detail={`${summary.withoutDueDate} atividades consideradas`} value={withoutDueRate} tone="yellow" />
         <MetricBar label="Alta prioridade aberta" detail={`${summary.highPriorityOpen} entre altas e urgentes`} value={highPriorityRate} tone="orange" />
@@ -98,7 +98,7 @@ export default function UserAnalytics({ team, tasks, start, end, period, selecte
       </section>
     </div>
 
-    <footer className="analytics-footnote"><CalendarOff />Atividades sem prazo entram em todos os períodos. Os indicadores consideram apenas atribuições desta equipe.</footer>
+    <footer className="analytics-footnote"><CalendarOff />Todas as atividades abertas entram na carteira. Concluídas, com ou sem prazo, entram pela data de conclusão. A média compara os usuários exibidos.</footer>
   </div>;
 }
 

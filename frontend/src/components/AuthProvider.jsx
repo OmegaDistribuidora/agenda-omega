@@ -8,6 +8,14 @@ export function AuthProvider({ children }) {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user })); }, [token, user]);
   useEffect(() => { setUnauthorizedHandler(() => { setToken(null); setUser(null); }); return () => setUnauthorizedHandler(null); }, []);
   useEffect(() => {
+    if (!token) return;
+    let active = true;
+    const check = () => apiJson("/auth/me", { token }).then(result => { if (active) setUser(result.user); }).catch(() => {});
+    const interval = setInterval(check, 30000);
+    window.addEventListener("focus", check);
+    return () => { active = false; clearInterval(interval); window.removeEventListener("focus", check); };
+  }, [token]);
+  useEffect(() => {
     const value = ssoToken(); let alive = true;
     if (value) apiJson("/auth/sso/exchange", { method: "POST", data: { token: value } }).then((result) => { if (alive) { setToken(result.token); setUser(result.user); } }).catch((error) => { if (alive) setSsoError(error.message); }).finally(() => { history.replaceState(null, "", `${location.pathname}${location.search}`); if (alive) setLoading(false); });
     else if (token) apiJson("/auth/me", { token }).then((result) => { if (alive) setUser(result.user); }).catch(() => { if (alive) { setToken(null); setUser(null); } }).finally(() => { if (alive) setLoading(false); });

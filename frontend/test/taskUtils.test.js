@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUserAnalytics, completionBuckets, completionPercentage, isTaskInPeriod, matchesTaskScope, nextStatus, resolveTeamContext, responsibleOptions, tasksForUserPeriod } from "../src/lib/taskUtils.js";
+import { buildUserAnalytics, completionBuckets, completionPercentage, isTaskInPeriod, isCompletedInPeriod, teamCompletionGroups, matchesTaskScope, nextStatus, resolveTeamContext, responsibleOptions, tasksForUserPeriod } from "../src/lib/taskUtils.js";
 import { clipboardImageFiles, imageExtension } from "../src/lib/clipboard.js";
 
 test("o botão rápido percorre os três estados", () => {
@@ -70,7 +70,31 @@ test("análise por usuário inclui atividades sem prazo em qualquer período", (
     { id: 3, teamId: 2, dueAt: "2026-09-01T12:00:00-03:00", status: "TODO", priority: "LOW", assignees: [assignment] }
   ];
   assert.equal(isTaskInPeriod(tasks[0], start, end), true);
-  assert.deepEqual(tasksForUserPeriod(tasks, 2, 10, start, end).map((task) => task.id), [1, 2]);
+  assert.deepEqual(tasksForUserPeriod(tasks, 2, 10, start, end).map((task) => task.id), [1, 2, 3]);
+});
+
+test("prazo não esconde abertas; concluídas usam somente a data de conclusão", () => {
+  const start = new Date("2026-10-01T00:00:00-03:00");
+  const end = new Date("2026-11-01T00:00:00-03:00");
+  for (const status of ["TODO", "IN_PROGRESS"]) {
+    for (const dueAt of [null, "2026-08-01", "2027-01-01"]) assert.equal(isTaskInPeriod({ status, dueAt }, start, end), true);
+  }
+  assert.equal(isTaskInPeriod({ status: "DONE", dueAt: "2026-08-01", completedAt: start }, start, end), true);
+  assert.equal(isTaskInPeriod({ status: "DONE", dueAt: null, completedAt: "2026-09-30T23:59:59-03:00" }, start, end), false);
+  assert.equal(isCompletedInPeriod({ status: "DONE", completedAt: end }, start, end), false);
+  assert.equal(isCompletedInPeriod({ status: "DONE", completedAt: null }, start, end), false);
+});
+
+test("análise da equipe distribui entregas compartilhadas e inclui membros sem entrega", () => {
+  const users = [1,2,3].map(id => ({ id, displayName: `Pessoa ${id}` }));
+  const team = { id: 10, members: users.map(user => ({ user })) };
+  const start = new Date("2026-10-01"), end = new Date("2026-11-01");
+  const tasks = [
+    { id: 1, teamId: 10, status: "DONE", dueAt: "2026-08-01", completedAt: "2026-10-06", assignees: users.slice(0,2).map(user => ({ user })) },
+    { id: 2, teamId: 10, status: "TODO", assignees: [{ user: users[2] }] },
+    { id: 3, teamId: 20, status: "DONE", completedAt: "2026-10-06", assignees: [{ user: users[2] }] }
+  ];
+  assert.deepEqual(teamCompletionGroups(team, tasks, start, end).map(group => [group.user.id, group.tasks.length]), [[1,1],[2,1],[3,0]]);
 });
 
 test("calcula indicadores individuais sem conceder peso extra a tarefas sem prazo", () => {
