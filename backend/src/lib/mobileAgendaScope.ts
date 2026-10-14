@@ -18,9 +18,6 @@ export function canViewMobileAgendaOwner(
   if (owner.active === false || !agendaOwnerRoles.has(owner.role) || !String(owner.code || "").trim()) {
     return false;
   }
-  // Coordenadores acessam a própria agenda pelo vínculo direto do usuário.
-  // Nunca concedemos a eles uma agenda de terceiro por esta lista auxiliar.
-  if (viewerProfileSlug === "coordenador") return false;
-  if (viewerProfileSlug !== "gerencia") return true;
+  if (!["gerencia", "coordenador"].includes(viewerProfileSlug)) return true;
   return visibleOwnerKeys?.has(mobileAgendaOwnerKey(owner)) === true;
 }

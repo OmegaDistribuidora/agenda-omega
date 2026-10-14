@@ -122,6 +122,18 @@ async function resolveAppIdentity(request: FastifyRequest, reply: FastifyReply):
         const role = owner.profile_slug === "coordenador" ? "COORDINATOR" : "SUPERVISOR";
         return mobileAgendaOwnerKey({ role, code: owner.owner_code || null });
       }));
+    } else if (profileSlug === "coordenador") {
+      const visibleSupervisors = await supabaseRequest<Array<{
+        owner_code?: string;
+      }>>("/rest/v1/rpc/app_view_scope_options", token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowed_target_profiles: ["supervisor"] })
+      });
+      visibleAgendaOwnerKeys = new Set(visibleSupervisors.map((owner) =>
+        mobileAgendaOwnerKey({ role: "SUPERVISOR", code: owner.owner_code || null })
+      ));
+      visibleAgendaOwnerKeys.add(mobileAgendaOwnerKey({ role: "COORDINATOR", code }));
     }
     return {
       authUserId: authUser.id,
@@ -224,7 +236,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ message: "Período inválido." });
     const anchor = parsed.data.anchor || new Date().toISOString().slice(0, 10);
     const { start, end } = saoPauloPeriodBounds(parsed.data.period, anchor);
-    const canSelectOwner = ["diretoria", "outros", "gerencia"]
+    const canSelectOwner = ["diretoria", "outros", "gerencia", "coordenador"]
       .includes(context.profileSlug);
     let owners = canSelectOwner
       ? await prisma.user.findMany({
@@ -233,12 +245,20 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
           orderBy: [{ role: "asc" }, { displayName: "asc" }, { code: "asc" }]
         }) as Array<NonNullable<MobileContext["agendaUser"]>>
       : context.agendaUser ? [context.agendaUser] : [];
-    if (context.profileSlug === "gerencia") {
+    if (["gerencia", "coordenador"].includes(context.profileSlug)) {
       owners = owners.filter((owner) => canViewMobileAgendaOwner(
         context.profileSlug,
         context.visibleAgendaOwnerKeys,
         { ...owner, active: true }
       ));
+    }
+    if (context.profileSlug === "coordenador" && context.agendaUser) {
+      const ownAgendaUserId = context.agendaUser.id;
+      owners.sort((left, right) => {
+        if (left.id === ownAgendaUserId) return -1;
+        if (right.id === ownAgendaUserId) return 1;
+        return left.displayName.localeCompare(right.displayName, "pt-BR");
+      });
     }
     let selectedUser = context.agendaUser;
     if (canSelectOwner && (parsed.data.ownerCode || parsed.data.ownerRole)) {
@@ -504,7 +524,7 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       include: { task: { select: { id: true } } }
     });
     if (!attachment) return reply.code(404).send({ message: "Foto não encontrada." });
-    if (context.agendaUser) {
+    if (context.agendaUser && context.profileSlug !== "coordenador") {
       if (!await ownTask(context, attachment.task.id, reply)) return;
     } else {
       const visibleTask = await prisma.task.findFirst({

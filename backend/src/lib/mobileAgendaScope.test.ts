@@ -25,24 +25,22 @@ test("gerencia enxerga somente os responsaveis liberados pelo Supabase", () => {
   }), false);
 });
 
-test("coordenador nao recebe acesso delegado a agendas de terceiros", () => {
+test("coordenador enxerga a propria agenda e somente seus supervisores", () => {
   const coordinatorKeys = new Set([
     "COORDINATOR|12",
     "SUPERVISOR|33",
     "SUPERVISOR|29"
   ]);
-  // A própria agenda é resolvida diretamente pelo usuário autenticado,
-  // sem passar por esta lista de visibilidade.
   assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
     active: true,
     role: "COORDINATOR",
     code: "12"
-  }), false);
+  }), true);
   assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
     active: true,
     role: "SUPERVISOR",
     code: "33"
-  }), false);
+  }), true);
   assert.equal(canViewMobileAgendaOwner("coordenador", coordinatorKeys, {
     active: true,
     role: "SUPERVISOR",
