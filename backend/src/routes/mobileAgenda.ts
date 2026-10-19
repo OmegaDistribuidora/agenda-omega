@@ -275,7 +275,10 @@ export async function registerMobileAgendaRoutes(app: FastifyInstance) {
       where: {
         deletedAt: null,
         assignees: { some: { userId: selectedUser.id } },
-        OR: [{ dueAt: null }, { dueAt: { gte: start, lt: end } }]
+        OR: [
+          { status: { not: "DONE" } },
+          { status: "DONE", completedAt: { gte: start, lt: end } }
+        ]
       },
       include: mobileTaskInclude,
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { position: "asc" }, { createdAt: "desc" }]
